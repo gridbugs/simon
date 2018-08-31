@@ -1,0 +1,12 @@
+[package]
+name = "argon"
+description = "Argument parsing library"
+version = "0.0.0"
+authors = ["Stephen Sherratt <sfsherratt@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+homepage = "https://github.com/stevebob/argon.git"
+repository = "https://github.com/stevebob/argon.git"
+documentation = "https://docs.rs/argon"
+
+[dependencies]
