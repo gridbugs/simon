@@ -1,4 +1,4 @@
-# Argon
+# Argle
 
 Argument parsing library for rust.
 Many approaches to argument parsing decouple:
