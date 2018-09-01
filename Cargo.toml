@@ -10,3 +10,5 @@ repository = "https://github.com/stevebob/argle.git"
 documentation = "https://docs.rs/argle"
 
 [dependencies]
+getopts = "0.2"
+either = "1.5"
