@@ -1,6 +1,6 @@
 [package]
 name = "argle"
-description = "Argument parsing library"
+description = "Command line argument combinator library"
 version = "0.0.0"
 authors = ["Stephen Sherratt <sfsherratt@gmail.com>"]
 license = "MIT"
