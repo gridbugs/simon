@@ -565,7 +565,7 @@ where
 {
 }
 
-fn flag(short: &str, long: &str, doc: &str) -> impl Param<Item = bool> {
+pub fn flag(short: &str, long: &str, doc: &str) -> impl Param<Item = bool> {
     Flag {
         short: short.to_string(),
         long: long.to_string(),
