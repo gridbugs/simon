@@ -222,7 +222,7 @@ pub trait Param {
 
         (result, usage_with_program_name)
     }
-    fn parse_env_def(
+    fn parse_env_default(
         &self,
     ) -> (
         Result<Self::Item, TopLevelError<Self::Error>>,
@@ -1232,7 +1232,7 @@ where
     arg_opt_by(short, long, doc, hint, parse).required()
 }
 
-pub fn arg_opt_def_by<T, E, F>(
+pub fn arg_opt_default_by<T, E, F>(
     short: &str,
     long: &str,
     doc: &str,
@@ -1264,7 +1264,7 @@ where
     arg_opt(short, long, doc, hint).required()
 }
 
-pub fn arg_opt_def<T>(
+pub fn arg_opt_default<T>(
     short: &str,
     long: &str,
     doc: &str,
