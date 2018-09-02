@@ -1,3 +1,4 @@
+#![feature(trace_macros)]
 extern crate either;
 extern crate getopts;
 
@@ -5,6 +6,7 @@ use std::str::FromStr;
 use std::fmt::{self, Debug, Display, Write};
 use std::ffi::OsStr;
 use std::rc::Rc;
+use std::env;
 
 #[derive(Debug)]
 pub enum TopLevelError<E> {
@@ -48,13 +50,25 @@ pub struct WhichNotes {
     pub required: bool,
 }
 
-impl Default for WhichNotes {
-    fn default() -> Self {
+impl WhichNotes {
+    pub fn all() -> Self {
         Self {
             default_value: true,
             dependency: true,
             required: true,
         }
+    }
+    pub fn none() -> Self {
+        Self {
+            default_value: false,
+            dependency: false,
+            required: false,
+        }
+    }
+}
+impl Default for WhichNotes {
+    fn default() -> Self {
+        Self::all()
     }
 }
 
@@ -100,10 +114,10 @@ impl NoteList {
 }
 
 impl Notes {
-    fn new() -> Self {
+    pub fn new(which_notes_to_document: WhichNotes) -> Self {
         Self {
             list: NoteList::new(),
-            which_notes_to_document: Default::default(),
+            which_notes_to_document,
         }
     }
     pub fn push(self, note: Note) -> Self {
@@ -116,12 +130,49 @@ impl Notes {
         match &self.list {
             NoteList::Empty => (),
             NoteList::Cons(node) => {
-                write!(buf, "(");
+                write!(buf, " (");
                 node.0.append(self.which_notes_to_document, buf);
                 node.1.append_rec(", ", self.which_notes_to_document, buf);
                 write!(buf, ")");
             }
         }
+    }
+}
+
+pub enum ProgramName {
+    Literal(String),
+    ReadArg0,
+}
+
+impl Default for ProgramName {
+    fn default() -> Self {
+        ProgramName::ReadArg0
+    }
+}
+
+pub struct Usage {
+    opts: getopts::Options,
+}
+
+impl Usage {
+    pub fn render(&self, brief: &str) -> String {
+        self.opts.usage(brief)
+    }
+}
+
+pub struct UsageWithProgramName {
+    pub usage: Usage,
+    pub program_name: String,
+}
+
+impl UsageWithProgramName {
+    pub fn render(&self) -> String {
+        let brief = format!("Usage: {} [options]", &self.program_name);
+        self.usage.render(&brief)
+    }
+    pub fn render_with_brief<F: Fn(&str) -> String>(&self, brief_given_program_name: F) -> String {
+        self.usage
+            .render(brief_given_program_name(self.program_name.as_str()).as_str())
     }
 }
 
@@ -131,13 +182,53 @@ pub trait Param {
     fn update_options(&self, opts: &mut getopts::Options, notes: Notes);
     fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error>;
     fn name(&self) -> String;
-    fn parse<C: IntoIterator>(&self, args: C) -> Result<Self::Item, TopLevelError<Self::Error>>
+    fn parse<C: IntoIterator>(
+        &self,
+        args: C,
+        which_notes_to_document: WhichNotes,
+    ) -> (Result<Self::Item, TopLevelError<Self::Error>>, Usage)
     where
         C::Item: AsRef<OsStr>,
     {
         let mut opts = getopts::Options::new();
-        self.update_options(&mut opts, Notes::new());
-        self.get(&opts.parse(args)?).map_err(TopLevelError::Other)
+        self.update_options(&mut opts, Notes::new(which_notes_to_document));
+        (
+            opts.parse(args)
+                .map_err(TopLevelError::Getopts)
+                .and_then(|matches| self.get(&matches).map_err(TopLevelError::Other)),
+            Usage { opts },
+        )
+    }
+    fn parse_env(
+        &self,
+        which_notes_to_document: WhichNotes,
+        program_name: ProgramName,
+    ) -> (
+        Result<Self::Item, TopLevelError<Self::Error>>,
+        UsageWithProgramName,
+    ) {
+        let args: Vec<String> = env::args().collect();
+        let program_name = match program_name {
+            ProgramName::Literal(program_name) => program_name.clone(),
+            ProgramName::ReadArg0 => args[0].clone(),
+        };
+
+        let (result, usage) = self.parse(&args[1..], which_notes_to_document);
+
+        let usage_with_program_name = UsageWithProgramName {
+            usage,
+            program_name,
+        };
+
+        (result, usage_with_program_name)
+    }
+    fn parse_env_def(
+        &self,
+    ) -> (
+        Result<Self::Item, TopLevelError<Self::Error>>,
+        UsageWithProgramName,
+    ) {
+        self.parse_env(Default::default(), Default::default())
     }
 }
 
@@ -156,13 +247,32 @@ pub struct Flag {
     pub doc: String,
 }
 
-#[derive(Debug)]
+impl Flag {
+    pub fn default_help() -> Self {
+        Self {
+            short: "h".to_string(),
+            long: "help".to_string(),
+            doc: "print this help menu".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum Never {}
 
 impl Display for Never {
     fn fmt(&self, _f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
             _ => unreachable!(),
+        }
+    }
+}
+
+impl Never {
+    fn result_ok<T>(result: Result<T, Never>) -> T {
+        match result {
+            Err(_) => unreachable!(),
+            Ok(t) => t,
         }
     }
 }
@@ -224,6 +334,71 @@ where
     }
     fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
         self.param.get(matches).map(&self.f)
+    }
+}
+
+pub enum HelpOr<T> {
+    Help,
+    Value(T),
+}
+
+pub struct WithHelp<V> {
+    cond: Flag,
+    value: V,
+}
+
+impl<V> Param for WithHelp<V>
+where
+    V: Param,
+{
+    type Item = HelpOr<V::Item>;
+    type Error = V::Error;
+    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
+        self.cond.update_options(opts, notes.clone());
+        self.value.update_options(opts, notes);
+    }
+    fn name(&self) -> String {
+        self.value.name()
+    }
+    fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
+        if Never::result_ok(self.cond.get(matches)) {
+            Ok(HelpOr::Help)
+        } else {
+            Ok(HelpOr::Value(self.value.get(matches)?))
+        }
+    }
+}
+
+pub struct Otherwise<C, V> {
+    cond: C,
+    value: V,
+}
+
+impl<T, C, V> Param for Otherwise<C, V>
+where
+    C: Param<Item = Option<T>>,
+    V: Param,
+{
+    type Item = either::Either<T, V::Item>;
+    type Error = either::Either<C::Error, V::Error>;
+    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
+        self.cond.update_options(opts, notes.clone());
+        self.value.update_options(opts, notes);
+    }
+    fn name(&self) -> String {
+        self.value.name()
+    }
+    fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
+        match self.cond.get(matches) {
+            Err(e) => Err(either::Left(e)),
+            Ok(o) => match o {
+                Some(t) => Ok(either::Left(t)),
+                None => match self.value.get(matches) {
+                    Err(e) => Err(either::Right(e)),
+                    Ok(o) => Ok(either::Right(o)),
+                },
+            },
+        }
     }
 }
 
@@ -647,7 +822,7 @@ where
     A: Param,
     A::Item: Clone + Debug + Display,
     E: Debug + Display,
-    F: Fn(A::Item) -> Result<U, E>,
+    F: Fn(&A::Item) -> Result<U, E>,
 {
     type Item = U;
     type Error = ConvertError<A::Error, A::Item, E>;
@@ -662,7 +837,7 @@ where
             .get(matches)
             .map_err(ConvertError::Other)
             .and_then(|o| {
-                (self.f)(o.clone()).map_err(|error| ConvertError::ConversionFailed {
+                (self.f)(&o).map_err(|error| ConvertError::ConversionFailed {
                     name: self.param.name(),
                     value: o,
                     error,
@@ -782,6 +957,35 @@ where
     }
 }
 
+pub struct Value<T> {
+    name: String,
+    value: T,
+}
+
+impl<T> Param for Value<T>
+where
+    T: Clone,
+{
+    type Item = T;
+    type Error = Never;
+    fn update_options(&self, _opts: &mut getopts::Options, _notes: Notes) {}
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+    fn get(&self, _matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
+        Ok(self.value.clone())
+    }
+}
+
+impl<T: Clone> Value<T> {
+    pub fn new(value: T, name: &str) -> Value<T> {
+        Self {
+            value,
+            name: name.to_string(),
+        }
+    }
+}
+
 pub trait ParamExt: Param {
     fn map<U, F>(self, f: F) -> Map<Self, F>
     where
@@ -808,7 +1012,7 @@ pub trait ParamExt: Param {
     fn convert<F, U, E>(self, f: F) -> Convert<Self, F>
     where
         E: Debug + Display,
-        F: Fn(Self::Item) -> Result<U, E>,
+        F: Fn(&Self::Item) -> Result<U, E>,
         Self: Sized,
         Self::Item: Clone + Debug,
     {
@@ -834,6 +1038,21 @@ pub trait ParamExt: Param {
             param: self,
             which_notes_to_document,
         }
+    }
+    fn with_help(self, help: Flag) -> WithHelp<Self>
+    where
+        Self: Sized,
+    {
+        WithHelp {
+            cond: help,
+            value: self,
+        }
+    }
+    fn with_default_help(self) -> WithHelp<Self>
+    where
+        Self: Sized,
+    {
+        self.with_help(Flag::default_help())
     }
 }
 
@@ -913,6 +1132,17 @@ pub trait ParamOptExt: Param + ParamExt {
     {
         OptConvert { param: self, f }
     }
+
+    fn otherwise<B>(self, b: B) -> Otherwise<Self, B>
+    where
+        B: Param,
+        Self: Sized,
+    {
+        Otherwise {
+            cond: self,
+            value: b,
+        }
+    }
 }
 
 impl<T, P: ?Sized> ParamOptExt for P
@@ -922,12 +1152,23 @@ where
     type OptItem = T;
 }
 
+pub type UnitOption<T> = SomeIf<T, ()>;
+
 pub trait ParamBoolExt: Param + ParamExt {
     fn some_if<T>(self, value: T) -> SomeIf<Self, T>
     where
         Self: Sized,
     {
         SomeIf { param: self, value }
+    }
+    fn unit_option(self) -> UnitOption<Self>
+    where
+        Self: Sized,
+    {
+        SomeIf {
+            param: self,
+            value: (),
+        }
     }
 }
 
@@ -937,7 +1178,11 @@ where
 {
 }
 
-pub fn flag(short: &str, long: &str, doc: &str) -> impl Param<Item = bool> {
+pub fn value<T: Clone>(value: T, name: &str) -> impl Param<Item = T, Error = Never> {
+    Value::new(value, name)
+}
+
+pub fn flag(short: &str, long: &str, doc: &str) -> impl Param<Item = bool, Error = Never> {
     Flag {
         short: short.to_string(),
         long: long.to_string(),
@@ -959,12 +1204,56 @@ fn arg_opt_str(
     }
 }
 
+pub fn arg_opt_by<T, E, F>(
+    short: &str,
+    long: &str,
+    hint: &str,
+    doc: &str,
+    parse: F,
+) -> impl Param<Item = Option<T>>
+where
+    E: Clone + Debug + Display,
+    F: Fn(String) -> Result<T, E>,
+{
+    arg_opt_str(short, long, hint, doc).opt_convert(parse)
+}
+
+pub fn arg_req_by<T, E, F>(
+    short: &str,
+    long: &str,
+    hint: &str,
+    doc: &str,
+    parse: F,
+) -> impl Param<Item = T>
+where
+    E: Clone + Debug + Display,
+    F: Fn(String) -> Result<T, E>,
+{
+    arg_opt_by(short, long, hint, doc, parse).required()
+}
+
+pub fn arg_opt_def_by<T, E, F>(
+    short: &str,
+    long: &str,
+    hint: &str,
+    doc: &str,
+    default: T,
+    parse: F,
+) -> impl Param<Item = T>
+where
+    E: Clone + Debug + Display,
+    T: Clone + FromStr + Display,
+    F: Fn(String) -> Result<T, E>,
+{
+    arg_opt_by(short, long, hint, doc, parse).with_default(default)
+}
+
 pub fn arg_opt<T>(short: &str, long: &str, hint: &str, doc: &str) -> impl Param<Item = Option<T>>
 where
     T: FromStr,
     <T as FromStr>::Err: Clone + Debug + Display,
 {
-    arg_opt_str(short, long, hint, doc).opt_convert(|s| s.parse())
+    arg_opt_by(short, long, hint, doc, |s| s.parse())
 }
 
 pub fn arg_req<T>(short: &str, long: &str, hint: &str, doc: &str) -> impl Param<Item = T>
@@ -1001,21 +1290,40 @@ macro_rules! unflatten_closure {
 
 #[macro_export]
 macro_rules! join_params {
-    ( $head:expr, $($tail:expr),* $(,)* ) => {{
+    ( $only:expr ) => {
+        $only
+    };
+    ( $head:expr, $($tail:expr),* $(,)* ) => {
         $head $( .join($tail) )*
             .map(
                 unflatten_closure!(a => (a) $(, $tail )*)
             )
-    }}
+    };
+}
+
+#[macro_export]
+macro_rules! codepend_params {
+    ( $only:expr ) => {
+        $only
+    };
+    ( $head:expr, $($tail:expr),* $(,)* ) => {
+        $head $( .codepend($tail) )*
+            .opt_map(
+                unflatten_closure!(a => (a) $(, $tail )*)
+            )
+    };
 }
 
 #[macro_export]
 macro_rules! map_params {
-    ( let { $($var:ident = $a:expr;)* } in { $b:expr } ) => {
-        join_params! {
-            $($a),*
-        }.map(|($($var),*)| $b)
-    }
+    ( let { $var1:ident = $a1:expr; } in { $b:expr } ) => {
+        $a1.map(|$var1| $b)
+    };
+    ( let { $var1:ident = $a1:expr; $($var:ident = $a:expr;)+ } in { $b:expr } ) => {
+        { join_params! {
+            $a1, $($a),*
+        } } .map(|($var1, $($var),*)| $b)
+    };
 }
 
 #[cfg(test)]
@@ -1071,12 +1379,15 @@ mod tests {
             .join(window_size)
             .map(|(title, window_size)| Args { title, window_size });
 
-        match param.parse(&[""]) {
+        match param.parse(&[""], Default::default()).0 {
             Err(e) => assert_eq!(string_fmt(&e), "title is required but not supplied"),
             Ok(o) => panic!("{:?}", o),
         }
 
-        match param.parse(&["--title", "foo", "--width", "potato"]) {
+        match param
+            .parse(&["--title", "foo", "--width", "potato"], Default::default())
+            .0
+        {
             Err(e) => assert_eq!(
                 string_fmt(&e),
                 "invalid value \"potato\" supplied for \"width\" (invalid digit found in string)"
@@ -1084,15 +1395,21 @@ mod tests {
             Ok(o) => panic!("{:?}", o),
         }
 
-        match param.parse(&[
-            "--title",
-            "foo",
-            "--width",
-            "4",
-            "--height",
-            "2",
-            "--fullscreen",
-        ]) {
+        match param
+            .parse(
+                &[
+                    "--title",
+                    "foo",
+                    "--width",
+                    "4",
+                    "--height",
+                    "2",
+                    "--fullscreen",
+                ],
+                Default::default(),
+            )
+            .0
+        {
             Err(e) => assert_eq!(
                 string_fmt(&e),
                 "(width and height) and fullscreen are mutually exclusive but both were supplied"
@@ -1100,7 +1417,13 @@ mod tests {
             Ok(o) => panic!("{:?}", o),
         }
 
-        match param.parse(&["--title", "foo", "--width", "4", "--fullscreen"]) {
+        match param
+            .parse(
+                &["--title", "foo", "--width", "4", "--fullscreen"],
+                Default::default(),
+            )
+            .0
+        {
             Err(e) => assert_eq!(
                 string_fmt(&e),
                 "width and height must be supplied together or not at all \
@@ -1110,7 +1433,10 @@ mod tests {
         }
 
         assert_eq!(
-            param.parse(&["--title", "foo", "--fullscreen"]).unwrap(),
+            param
+                .parse(&["--title", "foo", "--fullscreen"], Default::default())
+                .0
+                .unwrap(),
             Args {
                 window_size: WindowSize::FullScreen,
                 title: "foo".to_string(),
@@ -1119,7 +1445,11 @@ mod tests {
 
         assert_eq!(
             param
-                .parse(&["--title", "foo", "--width", "4", "--height", "2"])
+                .parse(
+                    &["--title", "foo", "--width", "4", "--height", "2"],
+                    Default::default()
+                )
+                .0
                 .unwrap(),
             Args {
                 window_size: WindowSize::Dimensions {
@@ -1153,15 +1483,19 @@ mod tests {
         };
 
         let args = param
-            .parse(&[
-                "--foo",
-                "hello",
-                "--bar",
-                "12345",
-                "--baz-right",
-                "--qux",
-                "42",
-            ])
+            .parse(
+                &[
+                    "--foo",
+                    "hello",
+                    "--bar",
+                    "12345",
+                    "--baz-right",
+                    "--qux",
+                    "42",
+                ],
+                Default::default(),
+            )
+            .0
             .unwrap();
 
         assert_eq!(
@@ -1186,15 +1520,19 @@ mod tests {
         }.map(|(foo, bar, baz, qux)| Args { foo, bar, baz, qux });
 
         let args = param
-            .parse(&[
-                "--foo",
-                "hello",
-                "--bar",
-                "12345",
-                "--baz-right",
-                "--qux",
-                "42",
-            ])
+            .parse(
+                &[
+                    "--foo",
+                    "hello",
+                    "--bar",
+                    "12345",
+                    "--baz-right",
+                    "--qux",
+                    "42",
+                ],
+                Default::default(),
+            )
+            .0
             .unwrap();
 
         assert_eq!(
