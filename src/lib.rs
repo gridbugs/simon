@@ -630,6 +630,15 @@ macro_rules! join_params {
     }}
 }
 
+#[macro_export]
+macro_rules! map_params {
+    ( let { $($var:ident = $a:expr;)* } in { $b:expr } ) => {
+        join_params! {
+            $($a),*
+        }.map(|($($var),*)| $b)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -696,12 +705,16 @@ mod tests {
             qux: Option<u32>,
         }
 
-        let param = join_params! {
-            arg_req("f", "foo", "", ""),
-            arg_req("b", "bar", "", ""),
-            flag("l", "baz-left", "").join(flag("r", "baz-right", "")),
-            arg_opt("q", "qux", "", ""),
-        }.map(|(foo, bar, baz, qux)| Args { foo, bar, baz, qux });
+        let param = map_params! {
+            let {
+                foo = arg_req("f", "foo", "", "");
+                bar = arg_req("b", "bar", "", "");
+                baz = flag("l", "baz-left", "").join(flag("r", "baz-right", ""));
+                qux = arg_opt("q", "qux", "", "");
+            } in {
+                Args { foo, bar, baz, qux }
+            }
+        };
 
         let args = param
             .parse(&[
