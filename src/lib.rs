@@ -610,6 +610,26 @@ pub fn arg_opt_def<T: FromStr + Clone>(
     arg_opt(short, long, hint, doc).with_default(default)
 }
 
+#[macro_export]
+macro_rules! unflatten_closure {
+    ( $p:pat => $tup:expr ) => {
+        |$p| $tup
+    };
+    ( $p:pat => ( $($tup:tt)* ), $head:expr $(, $tail:expr)* ) => {
+        unflatten_closure!( ($p, a) => ( $($tup)*, a) $(, $tail )* )
+    };
+}
+
+#[macro_export]
+macro_rules! join_params {
+    ( $head:expr, $($tail:expr),* $(,)* ) => {{
+        $head $( .join($tail) )*
+            .map(
+                unflatten_closure!(a => (a) $(, $tail )*)
+            )
+    }}
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -662,6 +682,46 @@ mod tests {
             WindowSize::Dimensions {
                 width: 4,
                 height: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn multi_arg_program() {
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        struct Args {
+            foo: String,
+            bar: i64,
+            baz: (bool, bool),
+            qux: Option<u32>,
+        }
+
+        let param = join_params! {
+            arg_req("f", "foo", "", ""),
+            arg_req("b", "bar", "", ""),
+            flag("l", "baz-left", "").join(flag("r", "baz-right", "")),
+            arg_opt("q", "qux", "", ""),
+        }.map(|(foo, bar, baz, qux)| Args { foo, bar, baz, qux });
+
+        let args = param
+            .parse(&[
+                "--foo",
+                "hello",
+                "--bar",
+                "12345",
+                "--baz-right",
+                "--qux",
+                "42",
+            ])
+            .unwrap();
+
+        assert_eq!(
+            args,
+            Args {
+                foo: "hello".to_string(),
+                bar: 12345,
+                baz: (false, true),
+                qux: Some(42),
             }
         );
     }
