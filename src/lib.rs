@@ -1193,50 +1193,50 @@ pub fn flag(short: &str, long: &str, doc: &str) -> impl Param<Item = bool, Error
 fn arg_opt_str(
     short: &str,
     long: &str,
-    hint: &str,
     doc: &str,
+    hint: &str,
 ) -> impl Param<Item = Option<String>> {
     Arg {
         short: short.to_string(),
         long: long.to_string(),
-        hint: hint.to_string(),
         doc: doc.to_string(),
+        hint: hint.to_string(),
     }
 }
 
 pub fn arg_opt_by<T, E, F>(
     short: &str,
     long: &str,
-    hint: &str,
     doc: &str,
+    hint: &str,
     parse: F,
 ) -> impl Param<Item = Option<T>>
 where
     E: Clone + Debug + Display,
     F: Fn(String) -> Result<T, E>,
 {
-    arg_opt_str(short, long, hint, doc).opt_convert(parse)
+    arg_opt_str(short, long, doc, hint).opt_convert(parse)
 }
 
 pub fn arg_req_by<T, E, F>(
     short: &str,
     long: &str,
-    hint: &str,
     doc: &str,
+    hint: &str,
     parse: F,
 ) -> impl Param<Item = T>
 where
     E: Clone + Debug + Display,
     F: Fn(String) -> Result<T, E>,
 {
-    arg_opt_by(short, long, hint, doc, parse).required()
+    arg_opt_by(short, long, doc, hint, parse).required()
 }
 
 pub fn arg_opt_def_by<T, E, F>(
     short: &str,
     long: &str,
-    hint: &str,
     doc: &str,
+    hint: &str,
     default: T,
     parse: F,
 ) -> impl Param<Item = T>
@@ -1245,37 +1245,37 @@ where
     T: Clone + FromStr + Display,
     F: Fn(String) -> Result<T, E>,
 {
-    arg_opt_by(short, long, hint, doc, parse).with_default(default)
+    arg_opt_by(short, long, doc, hint, parse).with_default(default)
 }
 
-pub fn arg_opt<T>(short: &str, long: &str, hint: &str, doc: &str) -> impl Param<Item = Option<T>>
+pub fn arg_opt<T>(short: &str, long: &str, doc: &str, hint: &str) -> impl Param<Item = Option<T>>
 where
     T: FromStr,
     <T as FromStr>::Err: Clone + Debug + Display,
 {
-    arg_opt_by(short, long, hint, doc, |s| s.parse())
+    arg_opt_by(short, long, doc, hint, |s| s.parse())
 }
 
-pub fn arg_req<T>(short: &str, long: &str, hint: &str, doc: &str) -> impl Param<Item = T>
+pub fn arg_req<T>(short: &str, long: &str, doc: &str, hint: &str) -> impl Param<Item = T>
 where
     T: FromStr,
     <T as FromStr>::Err: Clone + Debug + Display,
 {
-    arg_opt(short, long, hint, doc).required()
+    arg_opt(short, long, doc, hint).required()
 }
 
 pub fn arg_opt_def<T>(
     short: &str,
     long: &str,
-    hint: &str,
     doc: &str,
+    hint: &str,
     default: T,
 ) -> impl Param<Item = T>
 where
     T: Clone + FromStr + Display,
     <T as FromStr>::Err: Clone + Debug + Display,
 {
-    arg_opt(short, long, hint, doc).with_default(default)
+    arg_opt(short, long, doc, hint).with_default(default)
 }
 
 #[macro_export]

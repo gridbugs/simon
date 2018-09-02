@@ -1,7 +1,7 @@
 [package]
 name = "argle"
 description = "Command line argument combinator library"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Stephen Sherratt <sfsherratt@gmail.com>"]
 license = "MIT"
 readme = "README.md"
