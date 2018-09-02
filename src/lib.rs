@@ -2,10 +2,9 @@ extern crate either;
 extern crate getopts;
 
 use std::str::FromStr;
-use std::fmt::{self, Debug, Display};
+use std::fmt::{self, Debug, Display, Write};
 use std::ffi::OsStr;
-
-pub trait ParamError: Debug + Display {}
+use std::rc::Rc;
 
 #[derive(Debug)]
 pub enum TopLevelError<E> {
@@ -13,7 +12,7 @@ pub enum TopLevelError<E> {
     Other(E),
 }
 
-impl<E: ParamError> Display for TopLevelError<E> {
+impl<E: Debug + Display> Display for TopLevelError<E> {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
             TopLevelError::Getopts(fail) => fmt::Display::fmt(&fail, f),
@@ -22,18 +21,114 @@ impl<E: ParamError> Display for TopLevelError<E> {
     }
 }
 
-impl<E: ParamError> ParamError for TopLevelError<E> {}
-
 impl<T> From<getopts::Fail> for TopLevelError<T> {
     fn from(f: getopts::Fail) -> Self {
         TopLevelError::Getopts(f)
     }
 }
 
+#[derive(Clone)]
+pub enum Note {
+    DefaultValue(String),
+    Dependency(String),
+    Required,
+}
+
+#[must_use]
+#[derive(Clone)]
+enum NoteList {
+    Empty,
+    Cons(Rc<(Note, NoteList)>),
+}
+
+#[derive(Clone, Copy)]
+pub struct WhichNotes {
+    pub default_value: bool,
+    pub dependency: bool,
+    pub required: bool,
+}
+
+impl Default for WhichNotes {
+    fn default() -> Self {
+        Self {
+            default_value: true,
+            dependency: true,
+            required: true,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct Notes {
+    list: NoteList,
+    pub which_notes_to_document: WhichNotes,
+}
+
+impl Note {
+    fn append(&self, which_notes: WhichNotes, buf: &mut String) {
+        match self {
+            Note::DefaultValue(d) => if which_notes.default_value {
+                write!(buf, "Default: {}", d);
+            },
+            Note::Dependency(c) => if which_notes.dependency {
+                write!(buf, "Dependency: {}", c);
+            },
+            Note::Required => if which_notes.required {
+                write!(buf, "Required");
+            },
+        }
+    }
+}
+
+impl NoteList {
+    fn new() -> Self {
+        NoteList::Empty
+    }
+    fn push(self, note: Note) -> Self {
+        NoteList::Cons(Rc::new((note, self)))
+    }
+    fn append_rec(&self, sep: &str, which_notes: WhichNotes, buf: &mut String) {
+        match self {
+            NoteList::Empty => (),
+            NoteList::Cons(node) => {
+                write!(buf, "{}", sep);
+                node.0.append(which_notes, buf);
+                node.1.append_rec(sep, which_notes, buf);
+            }
+        }
+    }
+}
+
+impl Notes {
+    fn new() -> Self {
+        Self {
+            list: NoteList::new(),
+            which_notes_to_document: Default::default(),
+        }
+    }
+    pub fn push(self, note: Note) -> Self {
+        Self {
+            list: self.list.push(note),
+            ..self
+        }
+    }
+    fn append(&self, buf: &mut String) {
+        match &self.list {
+            NoteList::Empty => (),
+            NoteList::Cons(node) => {
+                write!(buf, "(");
+                node.0.append(self.which_notes_to_document, buf);
+                node.1.append_rec(", ", self.which_notes_to_document, buf);
+                write!(buf, ")");
+            }
+        }
+    }
+}
+
 pub trait Param {
     type Item;
-    type Error: ParamError;
-    fn update_options(&self, opts: &mut getopts::Options);
+    type Error: Debug + Display;
+    fn update_options(&self, opts: &mut getopts::Options, notes: Notes);
     fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error>;
     fn name(&self) -> String;
     fn parse<C: IntoIterator>(&self, args: C) -> Result<Self::Item, TopLevelError<Self::Error>>
@@ -41,7 +136,7 @@ pub trait Param {
         C::Item: AsRef<OsStr>,
     {
         let mut opts = getopts::Options::new();
-        self.update_options(&mut opts);
+        self.update_options(&mut opts, Notes::new());
         self.get(&opts.parse(args)?).map_err(TopLevelError::Other)
     }
 }
@@ -72,16 +167,16 @@ impl Display for Never {
     }
 }
 
-impl ParamError for Never {}
-
 impl Param for Arg {
     type Item = Option<String>;
     type Error = Never;
-    fn update_options(&self, opts: &mut getopts::Options) {
+    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
+        let mut doc = self.doc.clone();
+        notes.append(&mut doc);
         opts.optopt(
             self.short.as_str(),
             self.long.as_str(),
-            self.doc.as_str(),
+            doc.as_str(),
             self.hint.as_str(),
         );
     }
@@ -96,8 +191,10 @@ impl Param for Arg {
 impl Param for Flag {
     type Item = bool;
     type Error = Never;
-    fn update_options(&self, opts: &mut getopts::Options) {
-        opts.optflag(self.short.as_str(), self.long.as_str(), self.doc.as_str());
+    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
+        let mut doc = self.doc.clone();
+        notes.append(&mut doc);
+        opts.optflag(self.short.as_str(), self.long.as_str(), doc.as_str());
     }
     fn name(&self) -> String {
         self.long.clone()
@@ -119,8 +216,8 @@ where
 {
     type Item = U;
     type Error = A::Error;
-    fn update_options(&self, opts: &mut getopts::Options) {
-        self.param.update_options(opts);
+    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
+        self.param.update_options(opts, notes);
     }
     fn name(&self) -> String {
         self.param.name()
@@ -142,8 +239,8 @@ where
 {
     type Item = Option<T>;
     type Error = A::Error;
-    fn update_options(&self, opts: &mut getopts::Options) {
-        self.param.update_options(opts);
+    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
+        self.param.update_options(opts, notes);
     }
     fn name(&self) -> String {
         self.param.name()
@@ -168,7 +265,7 @@ pub enum TryMapError<E, F> {
     MapFailed(F),
 }
 
-impl<E: ParamError, F: Debug + Display> Display for TryMapError<E, F> {
+impl<E: Debug + Display, F: Debug + Display> Display for TryMapError<E, F> {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
             TryMapError::MapFailed(fail) => fmt::Display::fmt(&fail, f),
@@ -176,8 +273,6 @@ impl<E: ParamError, F: Debug + Display> Display for TryMapError<E, F> {
         }
     }
 }
-
-impl<E: ParamError, F: Debug + Display> ParamError for TryMapError<E, F> {}
 
 impl<A, U, E, F> Param for TryMap<A, F>
 where
@@ -187,8 +282,8 @@ where
 {
     type Item = U;
     type Error = TryMapError<A::Error, E>;
-    fn update_options(&self, opts: &mut getopts::Options) {
-        self.param.update_options(opts);
+    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
+        self.param.update_options(opts, notes);
     }
     fn name(&self) -> String {
         self.param.name()
@@ -213,8 +308,8 @@ where
 {
     type Item = Option<U>;
     type Error = A::Error;
-    fn update_options(&self, opts: &mut getopts::Options) {
-        self.param.update_options(opts);
+    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
+        self.param.update_options(opts, notes);
     }
     fn name(&self) -> String {
         self.param.name()
@@ -237,8 +332,8 @@ where
 {
     type Item = Option<U>;
     type Error = TryMapError<A::Error, E>;
-    fn update_options(&self, opts: &mut getopts::Options) {
-        self.param.update_options(opts);
+    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
+        self.param.update_options(opts, notes);
     }
     fn name(&self) -> String {
         self.param.name()
@@ -261,8 +356,6 @@ pub struct Join<A, B> {
 
 pub type JoinError<A, B> = either::Either<A, B>;
 
-impl<A: ParamError, B: ParamError> ParamError for JoinError<A, B> {}
-
 impl<A, B> Param for Join<A, B>
 where
     A: Param,
@@ -270,9 +363,9 @@ where
 {
     type Item = (A::Item, B::Item);
     type Error = JoinError<A::Error, B::Error>;
-    fn update_options(&self, opts: &mut getopts::Options) {
-        self.a.update_options(opts);
-        self.b.update_options(opts);
+    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
+        self.a.update_options(opts, notes.clone());
+        self.b.update_options(opts, notes);
     }
     fn name(&self) -> String {
         format!("({} and {})", self.a.name(), self.b.name())
@@ -300,7 +393,7 @@ pub enum CodependError<A, B> {
     },
 }
 
-impl<A: ParamError, B: ParamError> Display for CodependError<A, B> {
+impl<A: Debug + Display, B: Debug + Display> Display for CodependError<A, B> {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
             CodependError::Left(a) => fmt::Display::fmt(&a, f),
@@ -317,8 +410,6 @@ impl<A: ParamError, B: ParamError> Display for CodependError<A, B> {
     }
 }
 
-impl<A: ParamError, B: ParamError> ParamError for CodependError<A, B> {}
-
 impl<T, U, A, B> Param for Codepend<A, B>
 where
     A: Param<Item = Option<T>>,
@@ -326,9 +417,11 @@ where
 {
     type Item = Option<(T, U)>;
     type Error = CodependError<A::Error, B::Error>;
-    fn update_options(&self, opts: &mut getopts::Options) {
-        self.a.update_options(opts);
-        self.b.update_options(opts);
+    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
+        let a_note = Note::Dependency(format!("must be specified with {}", self.b.name()));
+        let b_note = Note::Dependency(format!("must be specified with {}", self.a.name()));
+        self.a.update_options(opts, notes.clone().push(a_note));
+        self.b.update_options(opts, notes.push(b_note));
     }
     fn name(&self) -> String {
         format!("({} and {})", self.a.name(), self.b.name())
@@ -366,7 +459,7 @@ pub enum EitherError<A, B> {
     },
 }
 
-impl<A: ParamError, B: ParamError> Display for EitherError<A, B> {
+impl<A: Debug + Display, B: Debug + Display> Display for EitherError<A, B> {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
             EitherError::Left(a) => fmt::Display::fmt(&a, f),
@@ -383,7 +476,17 @@ impl<A: ParamError, B: ParamError> Display for EitherError<A, B> {
     }
 }
 
-impl<A: ParamError, B: ParamError> ParamError for EitherError<A, B> {}
+fn either_update_options(
+    a: &impl Param,
+    b: &impl Param,
+    opts: &mut getopts::Options,
+    notes: Notes,
+) {
+    let a_note = Note::Dependency(format!("mutually exclusive with {}", b.name()));
+    let b_note = Note::Dependency(format!("mutually exclusive with {}", a.name()));
+    a.update_options(opts, notes.clone().push(a_note));
+    b.update_options(opts, notes.push(b_note));
+}
 
 impl<T, U, A, B> Param for Either<A, B>
 where
@@ -392,9 +495,8 @@ where
 {
     type Item = Option<either::Either<T, U>>;
     type Error = EitherError<A::Error, B::Error>;
-    fn update_options(&self, opts: &mut getopts::Options) {
-        self.a.update_options(opts);
-        self.b.update_options(opts);
+    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
+        either_update_options(&self.a, &self.b, opts, notes);
     }
     fn name(&self) -> String {
         format!("({} or {})", self.a.name(), self.b.name())
@@ -426,9 +528,8 @@ where
 {
     type Item = Option<T>;
     type Error = EitherError<A::Error, B::Error>;
-    fn update_options(&self, opts: &mut getopts::Options) {
-        self.a.update_options(opts);
-        self.b.update_options(opts);
+    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
+        either_update_options(&self.a, &self.b, opts, notes);
     }
     fn name(&self) -> String {
         format!("({} or {})", self.a.name(), self.b.name())
@@ -455,13 +556,14 @@ pub struct WithDefault<P, T> {
 
 impl<P, T> Param for WithDefault<P, T>
 where
-    T: Clone,
+    T: Clone + Display,
     P: Param<Item = Option<T>>,
 {
     type Item = T;
     type Error = P::Error;
-    fn update_options(&self, opts: &mut getopts::Options) {
-        self.param.update_options(opts);
+    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
+        let note = Note::DefaultValue(format!("{}", self.default));
+        self.param.update_options(opts, notes.push(note));
     }
     fn name(&self) -> String {
         self.param.name()
@@ -483,7 +585,7 @@ pub enum RequiredError<E> {
     MissingRequiredParam { name: String },
 }
 
-impl<E: ParamError> Display for RequiredError<E> {
+impl<E: Debug + Display> Display for RequiredError<E> {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
             RequiredError::Other(e) => fmt::Display::fmt(&e, f),
@@ -494,16 +596,14 @@ impl<E: ParamError> Display for RequiredError<E> {
     }
 }
 
-impl<E: ParamError> ParamError for RequiredError<E> {}
-
 impl<P, T> Param for Required<P>
 where
     P: Param<Item = Option<T>>,
 {
     type Item = T;
     type Error = RequiredError<P::Error>;
-    fn update_options(&self, opts: &mut getopts::Options) {
-        self.param.update_options(opts);
+    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
+        self.param.update_options(opts, notes.push(Note::Required));
     }
     fn name(&self) -> String {
         self.param.name()
@@ -529,7 +629,7 @@ pub enum ConvertError<O, T, E> {
     ConversionFailed { name: String, error: E, value: T },
 }
 
-impl<O: ParamError, T: Debug + Display, E: Debug + Display> Display for ConvertError<O, T, E> {
+impl<O: Debug + Display, T: Debug + Display, E: Debug + Display> Display for ConvertError<O, T, E> {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
             ConvertError::Other(e) => fmt::Display::fmt(&e, f),
@@ -542,8 +642,6 @@ impl<O: ParamError, T: Debug + Display, E: Debug + Display> Display for ConvertE
     }
 }
 
-impl<O: ParamError, T: Debug + Display, E: Debug + Display> ParamError for ConvertError<O, T, E> {}
-
 impl<A, F, U, E> Param for Convert<A, F>
 where
     A: Param,
@@ -553,8 +651,8 @@ where
 {
     type Item = U;
     type Error = ConvertError<A::Error, A::Item, E>;
-    fn update_options(&self, opts: &mut getopts::Options) {
-        self.param.update_options(opts);
+    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
+        self.param.update_options(opts, notes);
     }
     fn name(&self) -> String {
         self.param.name()
@@ -587,8 +685,8 @@ where
 {
     type Item = Option<U>;
     type Error = ConvertError<A::Error, T, E>;
-    fn update_options(&self, opts: &mut getopts::Options) {
-        self.param.update_options(opts);
+    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
+        self.param.update_options(opts, notes);
     }
     fn name(&self) -> String {
         self.param.name()
@@ -607,6 +705,80 @@ where
                 }),
                 None => Ok(None),
             })
+    }
+}
+
+pub struct Rename<P> {
+    param: P,
+    name: String,
+}
+
+impl<P> Param for Rename<P>
+where
+    P: Param,
+{
+    type Item = P::Item;
+    type Error = P::Error;
+
+    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
+        self.param.update_options(opts, notes);
+    }
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+    fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
+        self.param.get(matches)
+    }
+}
+
+pub struct AddNote<P> {
+    param: P,
+    note: Note,
+}
+
+impl<P> Param for AddNote<P>
+where
+    P: Param,
+{
+    type Item = P::Item;
+    type Error = P::Error;
+
+    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
+        self.param
+            .update_options(opts, notes.push(self.note.clone()));
+    }
+    fn name(&self) -> String {
+        self.param.name()
+    }
+    fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
+        self.param.get(matches)
+    }
+}
+
+pub struct SetNotesToDocument<P> {
+    param: P,
+    which_notes_to_document: WhichNotes,
+}
+
+impl<P> Param for SetNotesToDocument<P>
+where
+    P: Param,
+{
+    type Item = P::Item;
+    type Error = P::Error;
+
+    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
+        let notes = Notes {
+            which_notes_to_document: self.which_notes_to_document,
+            ..notes
+        };
+        self.param.update_options(opts, notes);
+    }
+    fn name(&self) -> String {
+        self.param.name()
+    }
+    fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
+        self.param.get(matches)
     }
 }
 
@@ -641,6 +813,27 @@ pub trait ParamExt: Param {
         Self::Item: Clone + Debug,
     {
         Convert { param: self, f }
+    }
+    fn rename(self, name: String) -> Rename<Self>
+    where
+        Self: Sized,
+    {
+        Rename { param: self, name }
+    }
+    fn add_note(self, note: Note) -> AddNote<Self>
+    where
+        Self: Sized,
+    {
+        AddNote { param: self, note }
+    }
+    fn set_notes_to_document(self, which_notes_to_document: WhichNotes) -> SetNotesToDocument<Self>
+    where
+        Self: Sized,
+    {
+        SetNotesToDocument {
+            param: self,
+            which_notes_to_document,
+        }
     }
 }
 
@@ -790,7 +983,7 @@ pub fn arg_opt_def<T>(
     default: T,
 ) -> impl Param<Item = T>
 where
-    T: Clone + FromStr,
+    T: Clone + FromStr + Display,
     <T as FromStr>::Err: Clone + Debug + Display,
 {
     arg_opt(short, long, hint, doc).with_default(default)
@@ -828,7 +1021,7 @@ macro_rules! map_params {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fmt::Write;
+    use std::fmt::{Display, Write};
 
     fn string_fmt<D: Display>(d: &D) -> String {
         let mut s = String::new();
@@ -844,23 +1037,46 @@ mod tests {
             FullScreen,
         }
 
+        impl Display for WindowSize {
+            fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+                match self {
+                    WindowSize::Dimensions { width, height } => write!(f, "{}x{}", width, height),
+                    WindowSize::FullScreen => write!(f, "fullscreen"),
+                }
+            }
+        }
+
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        struct Args {
+            window_size: WindowSize,
+            title: String,
+        }
+
         let dimensions = arg_opt("w", "width", "INT", "width")
             .codepend(arg_opt("e", "height", "INT", "height"))
             .opt_map(|(width, height)| WindowSize::Dimensions { width, height });
 
         let fullscreen = flag("f", "fullscreen", "fullscreen").some_if(WindowSize::FullScreen);
 
-        let param = dimensions.either_homogeneous(fullscreen).required();
+        let window_size = dimensions.either_homogeneous(fullscreen).with_default(
+            WindowSize::Dimensions {
+                width: 640,
+                height: 480,
+            },
+        );
+
+        let title = arg_req("t", "title", "STRING", "title");
+
+        let param = title
+            .join(window_size)
+            .map(|(title, window_size)| Args { title, window_size });
 
         match param.parse(&[""]) {
-            Err(e) => assert_eq!(
-                string_fmt(&e),
-                "((width and height) or fullscreen) is required but not supplied"
-            ),
+            Err(e) => assert_eq!(string_fmt(&e), "title is required but not supplied"),
             Ok(o) => panic!("{:?}", o),
         }
 
-        match param.parse(&["--width", "potato"]) {
+        match param.parse(&["--title", "foo", "--width", "potato"]) {
             Err(e) => assert_eq!(
                 string_fmt(&e),
                 "invalid value \"potato\" supplied for \"width\" (invalid digit found in string)"
@@ -868,7 +1084,15 @@ mod tests {
             Ok(o) => panic!("{:?}", o),
         }
 
-        match param.parse(&["--width", "4", "--height", "2", "--fullscreen"]) {
+        match param.parse(&[
+            "--title",
+            "foo",
+            "--width",
+            "4",
+            "--height",
+            "2",
+            "--fullscreen",
+        ]) {
             Err(e) => assert_eq!(
                 string_fmt(&e),
                 "(width and height) and fullscreen are mutually exclusive but both were supplied"
@@ -876,7 +1100,7 @@ mod tests {
             Ok(o) => panic!("{:?}", o),
         }
 
-        match param.parse(&["--width", "4", "--fullscreen"]) {
+        match param.parse(&["--title", "foo", "--width", "4", "--fullscreen"]) {
             Err(e) => assert_eq!(
                 string_fmt(&e),
                 "width and height must be supplied together or not at all \
@@ -886,15 +1110,23 @@ mod tests {
         }
 
         assert_eq!(
-            param.parse(&["--fullscreen"]).unwrap(),
-            WindowSize::FullScreen
+            param.parse(&["--title", "foo", "--fullscreen"]).unwrap(),
+            Args {
+                window_size: WindowSize::FullScreen,
+                title: "foo".to_string(),
+            }
         );
 
         assert_eq!(
-            param.parse(&["--width", "4", "--height", "2"]).unwrap(),
-            WindowSize::Dimensions {
-                width: 4,
-                height: 2,
+            param
+                .parse(&["--title", "foo", "--width", "4", "--height", "2"])
+                .unwrap(),
+            Args {
+                window_size: WindowSize::Dimensions {
+                    width: 4,
+                    height: 2,
+                },
+                title: "foo".to_string(),
             }
         );
     }
