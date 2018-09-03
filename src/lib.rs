@@ -232,6 +232,77 @@ pub trait Arg {
     ) {
         self.parse_env(Default::default(), Default::default())
     }
+
+    fn map<U, F>(self, f: F) -> Map<Self, F>
+    where
+        F: Fn(Self::Item) -> U,
+        Self: Sized,
+    {
+        Map { arg: self, f }
+    }
+    fn try_map<U, E, F>(self, f: F) -> TryMap<Self, F>
+    where
+        E: Debug,
+        F: Fn(Self::Item) -> Result<U, E>,
+        Self: Sized,
+    {
+        TryMap { arg: self, f }
+    }
+    fn join<B>(self, b: B) -> Join<Self, B>
+    where
+        B: Arg,
+        Self: Sized,
+    {
+        Join { a: self, b }
+    }
+    fn convert<F, U, E>(self, f: F) -> Convert<Self, F>
+    where
+        E: Debug + Display,
+        F: Fn(&Self::Item) -> Result<U, E>,
+        Self: Sized,
+        Self::Item: Clone + Debug,
+    {
+        Convert { arg: self, f }
+    }
+    fn rename(self, name: String) -> Rename<Self>
+    where
+        Self: Sized,
+    {
+        Rename { arg: self, name }
+    }
+    fn add_note(self, note: Note) -> AddNote<Self>
+    where
+        Self: Sized,
+    {
+        AddNote { arg: self, note }
+    }
+    fn set_notes_to_document(
+        self,
+        which_notes_to_document: WhichNotes,
+    ) -> SetNotesToDocument<Self>
+    where
+        Self: Sized,
+    {
+        SetNotesToDocument {
+            arg: self,
+            which_notes_to_document,
+        }
+    }
+    fn with_help(self, help: Flag) -> WithHelp<Self>
+    where
+        Self: Sized,
+    {
+        WithHelp {
+            cond: help,
+            value: self,
+        }
+    }
+    fn with_default_help(self) -> WithHelp<Self>
+    where
+        Self: Sized,
+    {
+        self.with_help(Flag::default_help())
+    }
 }
 
 #[derive(Default)]
@@ -1012,86 +1083,7 @@ impl<T: Clone> Value<T> {
     }
 }
 
-pub trait ArgExt: Arg {
-    fn map<U, F>(self, f: F) -> Map<Self, F>
-    where
-        F: Fn(Self::Item) -> U,
-        Self: Sized,
-    {
-        Map { arg: self, f }
-    }
-    fn try_map<U, E, F>(self, f: F) -> TryMap<Self, F>
-    where
-        E: Debug,
-        F: Fn(Self::Item) -> Result<U, E>,
-        Self: Sized,
-    {
-        TryMap { arg: self, f }
-    }
-    fn join<B>(self, b: B) -> Join<Self, B>
-    where
-        B: Arg,
-        Self: Sized,
-    {
-        Join { a: self, b }
-    }
-    fn convert<F, U, E>(self, f: F) -> Convert<Self, F>
-    where
-        E: Debug + Display,
-        F: Fn(&Self::Item) -> Result<U, E>,
-        Self: Sized,
-        Self::Item: Clone + Debug,
-    {
-        Convert { arg: self, f }
-    }
-    fn rename(self, name: String) -> Rename<Self>
-    where
-        Self: Sized,
-    {
-        Rename { arg: self, name }
-    }
-    fn add_note(self, note: Note) -> AddNote<Self>
-    where
-        Self: Sized,
-    {
-        AddNote { arg: self, note }
-    }
-    fn set_notes_to_document(
-        self,
-        which_notes_to_document: WhichNotes,
-    ) -> SetNotesToDocument<Self>
-    where
-        Self: Sized,
-    {
-        SetNotesToDocument {
-            arg: self,
-            which_notes_to_document,
-        }
-    }
-    fn with_help(self, help: Flag) -> WithHelp<Self>
-    where
-        Self: Sized,
-    {
-        WithHelp {
-            cond: help,
-            value: self,
-        }
-    }
-    fn with_default_help(self) -> WithHelp<Self>
-    where
-        Self: Sized,
-    {
-        self.with_help(Flag::default_help())
-    }
-}
-
-impl<P: ?Sized> ArgExt for P
-where
-    P: Arg,
-{
-}
-
-pub trait ArgOptionExt: Arg + ArgExt {
+pub trait ArgOption: Arg {
     type OptionItem;
 
     fn option_map<U, F>(self, f: F) -> OptionMap<Self, F>
@@ -1113,7 +1105,7 @@ pub trait ArgOptionExt: Arg + ArgExt {
 
     fn option_join<B>(self, b: B) -> OptionJoin<Self, B>
     where
-        B: ArgOptionExt,
+        B: ArgOption,
         Self: Sized,
     {
         OptionJoin { a: self, b }
@@ -1121,7 +1113,7 @@ pub trait ArgOptionExt: Arg + ArgExt {
 
     fn either<B>(self, b: B) -> EitherCombinator<Self, B>
     where
-        B: ArgOptionExt,
+        B: ArgOption,
         Self: Sized,
     {
         EitherCombinator { a: self, b }
@@ -1129,7 +1121,7 @@ pub trait ArgOptionExt: Arg + ArgExt {
 
     fn either_homogeneous<B>(self, b: B) -> EitherHomogeneous<Self, B>
     where
-        B: ArgOptionExt<OptionItem = Self::OptionItem>,
+        B: ArgOption<OptionItem = Self::OptionItem>,
         Self: Sized,
     {
         EitherHomogeneous { a: self, b }
@@ -1177,7 +1169,7 @@ pub trait ArgOptionExt: Arg + ArgExt {
     }
 }
 
-impl<T, P: ?Sized> ArgOptionExt for P
+impl<T, P: ?Sized> ArgOption for P
 where
     P: Arg<Item = Option<T>>,
 {
@@ -1186,7 +1178,7 @@ where
 
 pub type UnitOption<T> = SomeIf<T, ()>;
 
-pub trait ArgBoolExt: Arg + ArgExt {
+pub trait ArgBool: Arg {
     fn some_if<T>(self, value: T) -> SomeIf<Self, T>
     where
         Self: Sized,
@@ -1204,7 +1196,7 @@ pub trait ArgBoolExt: Arg + ArgExt {
     }
 }
 
-impl<P: ?Sized> ArgBoolExt for P
+impl<P: ?Sized> ArgBool for P
 where
     P: Arg<Item = bool>,
 {
