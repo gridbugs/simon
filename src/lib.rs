@@ -319,7 +319,7 @@ impl Arg for Flag {
 }
 
 pub struct Map<A, F> {
-    param: A,
+    arg: A,
     f: F,
 }
 
@@ -331,13 +331,13 @@ where
     type Item = U;
     type Error = A::Error;
     fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        self.param.update_options(opts, notes);
+        self.arg.update_options(opts, notes);
     }
     fn name(&self) -> String {
-        self.param.name()
+        self.arg.name()
     }
     fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
-        self.param.get(matches).map(&self.f)
+        self.arg.get(matches).map(&self.f)
     }
 }
 
@@ -407,7 +407,7 @@ where
 }
 
 pub struct SomeIf<A, T> {
-    param: A,
+    arg: A,
     value: T,
 }
 
@@ -419,13 +419,13 @@ where
     type Item = Option<T>;
     type Error = A::Error;
     fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        self.param.update_options(opts, notes);
+        self.arg.update_options(opts, notes);
     }
     fn name(&self) -> String {
-        self.param.name()
+        self.arg.name()
     }
     fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
-        Ok(if self.param.get(matches)? {
+        Ok(if self.arg.get(matches)? {
             Some(self.value.clone())
         } else {
             None
@@ -434,7 +434,7 @@ where
 }
 
 pub struct TryMap<A, F> {
-    param: A,
+    arg: A,
     f: F,
 }
 
@@ -462,25 +462,25 @@ where
     type Item = U;
     type Error = TryMapError<A::Error, E>;
     fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        self.param.update_options(opts, notes);
+        self.arg.update_options(opts, notes);
     }
     fn name(&self) -> String {
-        self.param.name()
+        self.arg.name()
     }
     fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
-        self.param
+        self.arg
             .get(matches)
             .map_err(TryMapError::Other)
             .and_then(|o| (self.f)(o).map_err(TryMapError::MapFailed))
     }
 }
 
-pub struct OptMap<A, F> {
-    param: A,
+pub struct OptionMap<A, F> {
+    arg: A,
     f: F,
 }
 
-impl<A, T, U, F> Arg for OptMap<A, F>
+impl<A, T, U, F> Arg for OptionMap<A, F>
 where
     A: Arg<Item = Option<T>>,
     F: Fn(T) -> U,
@@ -488,22 +488,22 @@ where
     type Item = Option<U>;
     type Error = A::Error;
     fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        self.param.update_options(opts, notes);
+        self.arg.update_options(opts, notes);
     }
     fn name(&self) -> String {
-        self.param.name()
+        self.arg.name()
     }
     fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
-        self.param.get(matches).map(|v| v.map(&self.f))
+        self.arg.get(matches).map(|v| v.map(&self.f))
     }
 }
 
-pub struct OptTryMap<A, F> {
-    param: A,
+pub struct OptionTryMap<A, F> {
+    arg: A,
     f: F,
 }
 
-impl<T, A, U, E, F> Arg for OptTryMap<A, F>
+impl<T, A, U, E, F> Arg for OptionTryMap<A, F>
 where
     A: Arg<Item = Option<T>>,
     E: Debug + Display,
@@ -512,13 +512,13 @@ where
     type Item = Option<U>;
     type Error = TryMapError<A::Error, E>;
     fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        self.param.update_options(opts, notes);
+        self.arg.update_options(opts, notes);
     }
     fn name(&self) -> String {
-        self.param.name()
+        self.arg.name()
     }
     fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
-        self.param
+        self.arg
             .get(matches)
             .map_err(TryMapError::Other)
             .and_then(|o| match o {
@@ -557,27 +557,27 @@ where
     }
 }
 
-pub struct Codepend<A, B> {
+pub struct OptionJoin<A, B> {
     a: A,
     b: B,
 }
 
 #[derive(Debug)]
-pub enum CodependError<A, B> {
+pub enum OptionJoinError<A, B> {
     Left(A),
     Right(B),
-    MissingCodependantArg {
+    MissingOptionJoinantArg {
         supplied_name: String,
         missing_name: String,
     },
 }
 
-impl<A: Debug + Display, B: Debug + Display> Display for CodependError<A, B> {
+impl<A: Debug + Display, B: Debug + Display> Display for OptionJoinError<A, B> {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
-            CodependError::Left(a) => fmt::Display::fmt(&a, f),
-            CodependError::Right(b) => fmt::Display::fmt(&b, f),
-            CodependError::MissingCodependantArg {
+            OptionJoinError::Left(a) => fmt::Display::fmt(&a, f),
+            OptionJoinError::Right(b) => fmt::Display::fmt(&b, f),
+            OptionJoinError::MissingOptionJoinantArg {
                 supplied_name,
                 missing_name,
             } => write!(
@@ -590,13 +590,13 @@ impl<A: Debug + Display, B: Debug + Display> Display for CodependError<A, B> {
     }
 }
 
-impl<T, U, A, B> Arg for Codepend<A, B>
+impl<T, U, A, B> Arg for OptionJoin<A, B>
 where
     A: Arg<Item = Option<T>>,
     B: Arg<Item = Option<U>>,
 {
     type Item = Option<(T, U)>;
-    type Error = CodependError<A::Error, B::Error>;
+    type Error = OptionJoinError<A::Error, B::Error>;
     fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
         let a_note =
             Note::Dependency(format!("must be specified with {}", self.b.name()));
@@ -610,16 +610,16 @@ where
         format!("({} and {})", self.a.name(), self.b.name())
     }
     fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
-        let maybe_a = self.a.get(matches).map_err(CodependError::Left)?;
-        let maybe_b = self.b.get(matches).map_err(CodependError::Right)?;
+        let maybe_a = self.a.get(matches).map_err(OptionJoinError::Left)?;
+        let maybe_b = self.b.get(matches).map_err(OptionJoinError::Right)?;
         match (maybe_a, maybe_b) {
             (Some(a), Some(b)) => Ok(Some((a, b))),
             (None, None) => Ok(None),
-            (Some(_), None) => Err(CodependError::MissingCodependantArg {
+            (Some(_), None) => Err(OptionJoinError::MissingOptionJoinantArg {
                 supplied_name: self.a.name(),
                 missing_name: self.b.name(),
             }),
-            (None, Some(_)) => Err(CodependError::MissingCodependantArg {
+            (None, Some(_)) => Err(OptionJoinError::MissingOptionJoinantArg {
                 supplied_name: self.b.name(),
                 missing_name: self.a.name(),
             }),
@@ -733,7 +733,7 @@ where
 }
 
 pub struct WithDefault<P, T> {
-    param: P,
+    arg: P,
     default: T,
 }
 
@@ -746,20 +746,20 @@ where
     type Error = P::Error;
     fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
         let note = Note::DefaultValue(format!("{}", self.default));
-        self.param.update_options(opts, notes.push(note));
+        self.arg.update_options(opts, notes.push(note));
     }
     fn name(&self) -> String {
-        self.param.name()
+        self.arg.name()
     }
     fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
-        Ok(self.param
+        Ok(self.arg
             .get(matches)?
             .unwrap_or_else(|| self.default.clone()))
     }
 }
 
 pub struct Required<P> {
-    param: P,
+    arg: P,
 }
 
 #[derive(Debug)]
@@ -786,24 +786,24 @@ where
     type Item = T;
     type Error = RequiredError<P::Error>;
     fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        self.param
+        self.arg
             .update_options(opts, notes.push(Note::Required));
     }
     fn name(&self) -> String {
-        self.param.name()
+        self.arg.name()
     }
     fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
-        self.param
+        self.arg
             .get(matches)
             .map_err(RequiredError::Other)?
             .ok_or(RequiredError::MissingRequiredArg {
-                name: self.param.name(),
+                name: self.arg.name(),
             })
     }
 }
 
 pub struct Convert<A, F> {
-    param: A,
+    arg: A,
     f: F,
 }
 
@@ -842,18 +842,18 @@ where
     type Item = U;
     type Error = ConvertError<A::Error, A::Item, E>;
     fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        self.param.update_options(opts, notes);
+        self.arg.update_options(opts, notes);
     }
     fn name(&self) -> String {
-        self.param.name()
+        self.arg.name()
     }
     fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
-        self.param
+        self.arg
             .get(matches)
             .map_err(ConvertError::Other)
             .and_then(|o| {
                 (self.f)(&o).map_err(|error| ConvertError::ConversionFailed {
-                    name: self.param.name(),
+                    name: self.arg.name(),
                     value: o,
                     error,
                 })
@@ -862,7 +862,7 @@ where
 }
 
 pub struct OptConvert<A, F> {
-    param: A,
+    arg: A,
     f: F,
 }
 
@@ -876,19 +876,19 @@ where
     type Item = Option<U>;
     type Error = ConvertError<A::Error, T, E>;
     fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        self.param.update_options(opts, notes);
+        self.arg.update_options(opts, notes);
     }
     fn name(&self) -> String {
-        self.param.name()
+        self.arg.name()
     }
     fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
-        self.param
+        self.arg
             .get(matches)
             .map_err(ConvertError::Other)
             .and_then(|o| match o {
                 Some(t) => (self.f)(t.clone()).map(Some).map_err(|error| {
                     ConvertError::ConversionFailed {
-                        name: self.param.name(),
+                        name: self.arg.name(),
                         value: t,
                         error,
                     }
@@ -899,7 +899,7 @@ where
 }
 
 pub struct Rename<P> {
-    param: P,
+    arg: P,
     name: String,
 }
 
@@ -911,18 +911,18 @@ where
     type Error = P::Error;
 
     fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        self.param.update_options(opts, notes);
+        self.arg.update_options(opts, notes);
     }
     fn name(&self) -> String {
         self.name.clone()
     }
     fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
-        self.param.get(matches)
+        self.arg.get(matches)
     }
 }
 
 pub struct AddNote<P> {
-    param: P,
+    arg: P,
     note: Note,
 }
 
@@ -934,19 +934,19 @@ where
     type Error = P::Error;
 
     fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        self.param
+        self.arg
             .update_options(opts, notes.push(self.note.clone()));
     }
     fn name(&self) -> String {
-        self.param.name()
+        self.arg.name()
     }
     fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
-        self.param.get(matches)
+        self.arg.get(matches)
     }
 }
 
 pub struct SetNotesToDocument<P> {
-    param: P,
+    arg: P,
     which_notes_to_document: WhichNotes,
 }
 
@@ -962,13 +962,13 @@ where
             which_notes_to_document: self.which_notes_to_document,
             ..notes
         };
-        self.param.update_options(opts, notes);
+        self.arg.update_options(opts, notes);
     }
     fn name(&self) -> String {
-        self.param.name()
+        self.arg.name()
     }
     fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
-        self.param.get(matches)
+        self.arg.get(matches)
     }
 }
 
@@ -1007,7 +1007,7 @@ pub trait ArgExt: Arg {
         F: Fn(Self::Item) -> U,
         Self: Sized,
     {
-        Map { param: self, f }
+        Map { arg: self, f }
     }
     fn try_map<U, E, F>(self, f: F) -> TryMap<Self, F>
     where
@@ -1015,7 +1015,7 @@ pub trait ArgExt: Arg {
         F: Fn(Self::Item) -> Result<U, E>,
         Self: Sized,
     {
-        TryMap { param: self, f }
+        TryMap { arg: self, f }
     }
     fn join<B>(self, b: B) -> Join<Self, B>
     where
@@ -1031,25 +1031,19 @@ pub trait ArgExt: Arg {
         Self: Sized,
         Self::Item: Clone + Debug,
     {
-        Convert { param: self, f }
+        Convert { arg: self, f }
     }
     fn rename(self, name: String) -> Rename<Self>
     where
         Self: Sized,
     {
-        Rename {
-            param: self,
-            name,
-        }
+        Rename { arg: self, name }
     }
     fn add_note(self, note: Note) -> AddNote<Self>
     where
         Self: Sized,
     {
-        AddNote {
-            param: self,
-            note,
-        }
+        AddNote { arg: self, note }
     }
     fn set_notes_to_document(
         self,
@@ -1059,7 +1053,7 @@ pub trait ArgExt: Arg {
         Self: Sized,
     {
         SetNotesToDocument {
-            param: self,
+            arg: self,
             which_notes_to_document,
         }
     }
@@ -1086,37 +1080,37 @@ where
 {
 }
 
-pub trait ArgOptExt: Arg + ArgExt {
-    type OptItem;
+pub trait ArgOptionExt: Arg + ArgExt {
+    type OptionItem;
 
-    fn opt_map<U, F>(self, f: F) -> OptMap<Self, F>
+    fn option_map<U, F>(self, f: F) -> OptionMap<Self, F>
     where
-        F: Fn(Self::OptItem) -> U,
+        F: Fn(Self::OptionItem) -> U,
         Self: Sized,
     {
-        OptMap { param: self, f }
+        OptionMap { arg: self, f }
     }
 
-    fn opt_try_map<U, E, F>(self, f: F) -> OptTryMap<Self, F>
+    fn option_try_map<U, E, F>(self, f: F) -> OptionTryMap<Self, F>
     where
         E: Debug,
-        F: Fn(Self::OptItem) -> Result<U, E>,
+        F: Fn(Self::OptionItem) -> Result<U, E>,
         Self: Sized,
     {
-        OptTryMap { param: self, f }
+        OptionTryMap { arg: self, f }
     }
 
-    fn codepend<B>(self, b: B) -> Codepend<Self, B>
+    fn option_join<B>(self, b: B) -> OptionJoin<Self, B>
     where
-        B: ArgOptExt,
+        B: ArgOptionExt,
         Self: Sized,
     {
-        Codepend { a: self, b }
+        OptionJoin { a: self, b }
     }
 
     fn either<B>(self, b: B) -> Either<Self, B>
     where
-        B: ArgOptExt,
+        B: ArgOptionExt,
         Self: Sized,
     {
         Either { a: self, b }
@@ -1124,18 +1118,21 @@ pub trait ArgOptExt: Arg + ArgExt {
 
     fn either_homogeneous<B>(self, b: B) -> EitherHomogeneous<Self, B>
     where
-        B: ArgOptExt<OptItem = Self::OptItem>,
+        B: ArgOptionExt<OptionItem = Self::OptionItem>,
         Self: Sized,
     {
         EitherHomogeneous { a: self, b }
     }
 
-    fn with_default(self, default: Self::OptItem) -> WithDefault<Self, Self::OptItem>
+    fn with_default(
+        self,
+        default: Self::OptionItem,
+    ) -> WithDefault<Self, Self::OptionItem>
     where
         Self: Sized,
     {
         WithDefault {
-            param: self,
+            arg: self,
             default,
         }
     }
@@ -1144,17 +1141,17 @@ pub trait ArgOptExt: Arg + ArgExt {
     where
         Self: Sized,
     {
-        Required { param: self }
+        Required { arg: self }
     }
 
-    fn opt_convert<F, U, E>(self, f: F) -> OptConvert<Self, F>
+    fn option_convert<F, U, E>(self, f: F) -> OptConvert<Self, F>
     where
         E: Debug + Display,
-        F: Fn(Self::OptItem) -> Result<U, E>,
+        F: Fn(Self::OptionItem) -> Result<U, E>,
         Self: Sized,
-        Self::OptItem: Clone + Debug,
+        Self::OptionItem: Clone + Debug,
     {
-        OptConvert { param: self, f }
+        OptConvert { arg: self, f }
     }
 
     fn otherwise<B>(self, b: B) -> Otherwise<Self, B>
@@ -1169,11 +1166,11 @@ pub trait ArgOptExt: Arg + ArgExt {
     }
 }
 
-impl<T, P: ?Sized> ArgOptExt for P
+impl<T, P: ?Sized> ArgOptionExt for P
 where
     P: Arg<Item = Option<T>>,
 {
-    type OptItem = T;
+    type OptionItem = T;
 }
 
 pub type UnitOption<T> = SomeIf<T, ()>;
@@ -1183,17 +1180,14 @@ pub trait ArgBoolExt: Arg + ArgExt {
     where
         Self: Sized,
     {
-        SomeIf {
-            param: self,
-            value,
-        }
+        SomeIf { arg: self, value }
     }
     fn unit_option(self) -> UnitOption<Self>
     where
         Self: Sized,
     {
         SomeIf {
-            param: self,
+            arg: self,
             value: (),
         }
     }
@@ -1242,7 +1236,7 @@ where
     E: Clone + Debug + Display,
     F: Fn(String) -> Result<T, E>,
 {
-    opt_str(short, long, doc, hint).opt_convert(parse)
+    opt_str(short, long, doc, hint).option_convert(parse)
 }
 
 pub fn opt_required_by<T, E, F>(
@@ -1326,7 +1320,7 @@ macro_rules! unflatten_closure {
 }
 
 #[macro_export]
-macro_rules! join_params {
+macro_rules! join_args {
     ( $only:expr ) => {
         $only
     };
@@ -1339,25 +1333,25 @@ macro_rules! join_params {
 }
 
 #[macro_export]
-macro_rules! codepend_params {
+macro_rules! option_join_args {
     ( $only:expr ) => {
         $only
     };
     ( $head:expr, $($tail:expr),* $(,)* ) => {
-        $head $( .codepend($tail) )*
-            .opt_map(
+        $head $( .option_join($tail) )*
+            .option_map(
                 unflatten_closure!(a => (a) $(, $tail )*)
             )
     };
 }
 
 #[macro_export]
-macro_rules! map_params {
+macro_rules! map_args {
     ( let { $var1:ident = $a1:expr; } in { $b:expr } ) => {
         $a1.map(|$var1| $b)
     };
     ( let { $var1:ident = $a1:expr; $($var:ident = $a:expr;)+ } in { $b:expr } ) => {
-        { join_params! {
+        { join_args! {
             $a1, $($a),*
         } } .map(|($var1, $($var),*)| $b)
     };
@@ -1400,8 +1394,8 @@ mod tests {
         }
 
         let dimensions = opt("w", "width", "INT", "width")
-            .codepend(opt("e", "height", "INT", "height"))
-            .opt_map(|(width, height)| WindowSize::Dimensions { width, height });
+            .option_join(opt("e", "height", "INT", "height"))
+            .option_map(|(width, height)| WindowSize::Dimensions { width, height });
 
         let fullscreen =
             flag("f", "fullscreen", "fullscreen").some_if(WindowSize::FullScreen);
@@ -1415,19 +1409,19 @@ mod tests {
 
         let title = opt_required("t", "title", "STRING", "title");
 
-        let param = title
+        let arg = title
             .join(window_size)
             .map(|(title, window_size)| Args {
                 title,
                 window_size,
             });
 
-        match param.parse(&[""], Default::default()).0 {
+        match arg.parse(&[""], Default::default()).0 {
             Err(e) => assert_eq!(string_fmt(&e), "title is required but not supplied"),
             Ok(o) => panic!("{:?}", o),
         }
 
-        match param
+        match arg
             .parse(&["--title", "foo", "--width", "potato"], Default::default())
             .0
         {
@@ -1438,7 +1432,7 @@ mod tests {
             Ok(o) => panic!("{:?}", o),
         }
 
-        match param
+        match arg
             .parse(
                 &[
                     "--title",
@@ -1460,12 +1454,10 @@ mod tests {
             Ok(o) => panic!("{:?}", o),
         }
 
-        match param
-            .parse(
-                &["--title", "foo", "--width", "4", "--fullscreen"],
-                Default::default(),
-            )
-            .0
+        match arg.parse(
+            &["--title", "foo", "--width", "4", "--fullscreen"],
+            Default::default(),
+        ).0
         {
             Err(e) => assert_eq!(
                 string_fmt(&e),
@@ -1476,12 +1468,10 @@ mod tests {
         }
 
         assert_eq!(
-            param
-                .parse(
-                    &["--title", "foo", "--fullscreen"],
-                    Default::default()
-                )
-                .0
+            arg.parse(
+                &["--title", "foo", "--fullscreen"],
+                Default::default()
+            ).0
                 .unwrap(),
             Args {
                 window_size: WindowSize::FullScreen,
@@ -1490,12 +1480,10 @@ mod tests {
         );
 
         assert_eq!(
-            param
-                .parse(
-                    &["--title", "foo", "--width", "4", "--height", "2"],
-                    Default::default()
-                )
-                .0
+            arg.parse(
+                &["--title", "foo", "--width", "4", "--height", "2"],
+                Default::default()
+            ).0
                 .unwrap(),
             Args {
                 window_size: WindowSize::Dimensions {
@@ -1516,8 +1504,8 @@ mod tests {
     }
 
     #[test]
-    fn map_params() {
-        let param = map_params! {
+    fn map_args() {
+        let arg = map_args! {
             let {
                 foo = opt_required("f", "foo", "", "");
                 bar = opt_required("b", "bar", "", "");
@@ -1528,20 +1516,18 @@ mod tests {
             }
         };
 
-        let args = param
-            .parse(
-                &[
-                    "--foo",
-                    "hello",
-                    "--bar",
-                    "12345",
-                    "--baz-right",
-                    "--qux",
-                    "42",
-                ],
-                Default::default(),
-            )
-            .0
+        let args = arg.parse(
+            &[
+                "--foo",
+                "hello",
+                "--bar",
+                "12345",
+                "--baz-right",
+                "--qux",
+                "42",
+            ],
+            Default::default(),
+        ).0
             .unwrap();
 
         assert_eq!(
@@ -1556,9 +1542,9 @@ mod tests {
     }
 
     #[test]
-    fn join_params() {
+    fn join_args() {
         let baz = flag("l", "baz-left", "").join(flag("r", "baz-right", ""));
-        let param = join_params! {
+        let arg = join_args! {
             opt_required("f", "foo", "", ""),
             opt_required("b", "bar", "", ""),
             baz,
@@ -1570,20 +1556,18 @@ mod tests {
             qux,
         });
 
-        let args = param
-            .parse(
-                &[
-                    "--foo",
-                    "hello",
-                    "--bar",
-                    "12345",
-                    "--baz-right",
-                    "--qux",
-                    "42",
-                ],
-                Default::default(),
-            )
-            .0
+        let args = arg.parse(
+            &[
+                "--foo",
+                "hello",
+                "--bar",
+                "12345",
+                "--baz-right",
+                "--qux",
+                "42",
+            ],
+            Default::default(),
+        ).0
             .unwrap();
 
         assert_eq!(
