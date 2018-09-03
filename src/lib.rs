@@ -2,11 +2,11 @@
 extern crate either;
 extern crate getopts;
 
-use std::str::FromStr;
-use std::fmt::{self, Debug, Display, Write};
-use std::ffi::OsStr;
-use std::rc::Rc;
 use std::env;
+use std::ffi::OsStr;
+use std::fmt::{self, Debug, Display, Write};
+use std::rc::Rc;
+use std::str::FromStr;
 
 #[derive(Debug)]
 pub enum TopLevelError<E> {
@@ -82,13 +82,13 @@ impl Note {
     fn append(&self, which_notes: WhichNotes, buf: &mut String) {
         match self {
             Note::DefaultValue(d) => if which_notes.default_value {
-                write!(buf, "Default: {}", d);
+                write!(buf, "Default: {}", d).unwrap();
             },
             Note::Dependency(c) => if which_notes.dependency {
-                write!(buf, "Dependency: {}", c);
+                write!(buf, "Dependency: {}", c).unwrap();
             },
             Note::Required => if which_notes.required {
-                write!(buf, "Required");
+                write!(buf, "Required").unwrap();
             },
         }
     }
@@ -105,7 +105,7 @@ impl NoteList {
         match self {
             NoteList::Empty => (),
             NoteList::Cons(node) => {
-                write!(buf, "{}", sep);
+                write!(buf, "{}", sep).unwrap();
                 node.0.append(which_notes, buf);
                 node.1.append_rec(sep, which_notes, buf);
             }
@@ -130,10 +130,11 @@ impl Notes {
         match &self.list {
             NoteList::Empty => (),
             NoteList::Cons(node) => {
-                write!(buf, " (");
+                write!(buf, " (").unwrap();
                 node.0.append(self.which_notes_to_document, buf);
-                node.1.append_rec(", ", self.which_notes_to_document, buf);
-                write!(buf, ")");
+                node.1
+                    .append_rec(", ", self.which_notes_to_document, buf);
+                write!(buf, ")").unwrap();
             }
         }
     }
@@ -170,7 +171,10 @@ impl UsageWithProgramName {
         let brief = format!("Usage: {} [options]", &self.program_name);
         self.usage.render(&brief)
     }
-    pub fn render_with_brief<F: Fn(&str) -> String>(&self, brief_given_program_name: F) -> String {
+    pub fn render_with_brief<F: Fn(&str) -> String>(
+        &self,
+        brief_given_program_name: F,
+    ) -> String {
         self.usage
             .render(brief_given_program_name(self.program_name.as_str()).as_str())
     }
@@ -578,7 +582,8 @@ impl<A: Debug + Display, B: Debug + Display> Display for CodependError<A, B> {
                 missing_name,
             } => write!(
                 f,
-                "{} and {} must be supplied together or not at all ({} is supplied, {} is missing)",
+                "{} and {} must be supplied together or not at all \
+                 ({} is supplied, {} is missing)",
                 supplied_name, missing_name, supplied_name, missing_name
             ),
         }
@@ -593,9 +598,12 @@ where
     type Item = Option<(T, U)>;
     type Error = CodependError<A::Error, B::Error>;
     fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        let a_note = Note::Dependency(format!("must be specified with {}", self.b.name()));
-        let b_note = Note::Dependency(format!("must be specified with {}", self.a.name()));
-        self.a.update_options(opts, notes.clone().push(a_note));
+        let a_note =
+            Note::Dependency(format!("must be specified with {}", self.b.name()));
+        let b_note =
+            Note::Dependency(format!("must be specified with {}", self.a.name()));
+        self.a
+            .update_options(opts, notes.clone().push(a_note));
         self.b.update_options(opts, notes.push(b_note));
     }
     fn name(&self) -> String {
@@ -778,7 +786,8 @@ where
     type Item = T;
     type Error = RequiredError<P::Error>;
     fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        self.param.update_options(opts, notes.push(Note::Required));
+        self.param
+            .update_options(opts, notes.push(Note::Required));
     }
     fn name(&self) -> String {
         self.param.name()
@@ -804,11 +813,17 @@ pub enum ConvertError<O, T, E> {
     ConversionFailed { name: String, error: E, value: T },
 }
 
-impl<O: Debug + Display, T: Debug + Display, E: Debug + Display> Display for ConvertError<O, T, E> {
+impl<O: Debug + Display, T: Debug + Display, E: Debug + Display> Display
+    for ConvertError<O, T, E>
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
             ConvertError::Other(e) => fmt::Display::fmt(&e, f),
-            ConvertError::ConversionFailed { name, error, value } => write!(
+            ConvertError::ConversionFailed {
+                name,
+                error,
+                value,
+            } => write!(
                 f,
                 "invalid value \"{}\" supplied for \"{}\" ({})",
                 value, name, error
@@ -1022,15 +1037,24 @@ pub trait ParamExt: Param {
     where
         Self: Sized,
     {
-        Rename { param: self, name }
+        Rename {
+            param: self,
+            name,
+        }
     }
     fn add_note(self, note: Note) -> AddNote<Self>
     where
         Self: Sized,
     {
-        AddNote { param: self, note }
+        AddNote {
+            param: self,
+            note,
+        }
     }
-    fn set_notes_to_document(self, which_notes_to_document: WhichNotes) -> SetNotesToDocument<Self>
+    fn set_notes_to_document(
+        self,
+        which_notes_to_document: WhichNotes,
+    ) -> SetNotesToDocument<Self>
     where
         Self: Sized,
     {
@@ -1159,7 +1183,10 @@ pub trait ParamBoolExt: Param + ParamExt {
     where
         Self: Sized,
     {
-        SomeIf { param: self, value }
+        SomeIf {
+            param: self,
+            value,
+        }
     }
     fn unit_option(self) -> UnitOption<Self>
     where
@@ -1182,7 +1209,11 @@ pub fn value<T: Clone>(value: T, name: &str) -> impl Param<Item = T, Error = Nev
     Value::new(value, name)
 }
 
-pub fn flag(short: &str, long: &str, doc: &str) -> impl Param<Item = bool, Error = Never> {
+pub fn flag(
+    short: &str,
+    long: &str,
+    doc: &str,
+) -> impl Param<Item = bool, Error = Never> {
     Flag {
         short: short.to_string(),
         long: long.to_string(),
@@ -1248,7 +1279,12 @@ where
     arg_opt_by(short, long, doc, hint, parse).with_default(default)
 }
 
-pub fn arg_opt<T>(short: &str, long: &str, doc: &str, hint: &str) -> impl Param<Item = Option<T>>
+pub fn arg_opt<T>(
+    short: &str,
+    long: &str,
+    doc: &str,
+    hint: &str,
+) -> impl Param<Item = Option<T>>
 where
     T: FromStr,
     <T as FromStr>::Err: Clone + Debug + Display,
@@ -1333,7 +1369,7 @@ mod tests {
 
     fn string_fmt<D: Display>(d: &D) -> String {
         let mut s = String::new();
-        write!(&mut s, "{}", d);
+        write!(&mut s, "{}", d).unwrap();
         s
     }
 
@@ -1348,7 +1384,9 @@ mod tests {
         impl Display for WindowSize {
             fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
                 match self {
-                    WindowSize::Dimensions { width, height } => write!(f, "{}x{}", width, height),
+                    WindowSize::Dimensions { width, height } => {
+                        write!(f, "{}x{}", width, height)
+                    }
                     WindowSize::FullScreen => write!(f, "fullscreen"),
                 }
             }
@@ -1364,20 +1402,24 @@ mod tests {
             .codepend(arg_opt("e", "height", "INT", "height"))
             .opt_map(|(width, height)| WindowSize::Dimensions { width, height });
 
-        let fullscreen = flag("f", "fullscreen", "fullscreen").some_if(WindowSize::FullScreen);
+        let fullscreen =
+            flag("f", "fullscreen", "fullscreen").some_if(WindowSize::FullScreen);
 
-        let window_size = dimensions.either_homogeneous(fullscreen).with_default(
-            WindowSize::Dimensions {
+        let window_size = dimensions
+            .either_homogeneous(fullscreen)
+            .with_default(WindowSize::Dimensions {
                 width: 640,
                 height: 480,
-            },
-        );
+            });
 
         let title = arg_req("t", "title", "STRING", "title");
 
         let param = title
             .join(window_size)
-            .map(|(title, window_size)| Args { title, window_size });
+            .map(|(title, window_size)| Args {
+                title,
+                window_size,
+            });
 
         match param.parse(&[""], Default::default()).0 {
             Err(e) => assert_eq!(string_fmt(&e), "title is required but not supplied"),
@@ -1434,7 +1476,10 @@ mod tests {
 
         assert_eq!(
             param
-                .parse(&["--title", "foo", "--fullscreen"], Default::default())
+                .parse(
+                    &["--title", "foo", "--fullscreen"],
+                    Default::default()
+                )
                 .0
                 .unwrap(),
             Args {
@@ -1517,7 +1562,12 @@ mod tests {
             arg_req("b", "bar", "", ""),
             baz,
             arg_opt("q", "qux", "", ""),
-        }.map(|(foo, bar, baz, qux)| Args { foo, bar, baz, qux });
+        }.map(|(foo, bar, baz, qux)| Args {
+            foo,
+            bar,
+            baz,
+            qux,
+        });
 
         let args = param
             .parse(
