@@ -1,5 +1,3 @@
-#![feature(trace_macros)]
-extern crate either;
 extern crate getopts;
 
 use std::env;
@@ -14,7 +12,7 @@ pub enum TopLevelError<E> {
     Other(E),
 }
 
-impl<E: Debug + Display> Display for TopLevelError<E> {
+impl<E: Display> Display for TopLevelError<E> {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
             TopLevelError::Getopts(fail) => fmt::Display::fmt(&fail, f),
@@ -281,6 +279,21 @@ impl Never {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum Either<A, B> {
+    Left(A),
+    Right(B),
+}
+
+impl<A: Display, B: Display> Display for Either<A, B> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            Either::Left(a) => fmt::Display::fmt(&a, f),
+            Either::Right(b) => fmt::Display::fmt(&b, f),
+        }
+    }
+}
+
 impl Arg for Opt {
     type Item = Option<String>;
     type Error = Never;
@@ -383,8 +396,8 @@ where
     C: Arg<Item = Option<T>>,
     V: Arg,
 {
-    type Item = either::Either<T, V::Item>;
-    type Error = either::Either<C::Error, V::Error>;
+    type Item = Either<T, V::Item>;
+    type Error = Either<C::Error, V::Error>;
     fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
         self.cond.update_options(opts, notes.clone());
         self.value.update_options(opts, notes);
@@ -394,12 +407,12 @@ where
     }
     fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
         match self.cond.get(matches) {
-            Err(e) => Err(either::Left(e)),
+            Err(e) => Err(Either::Left(e)),
             Ok(o) => match o {
-                Some(t) => Ok(either::Left(t)),
+                Some(t) => Ok(Either::Left(t)),
                 None => match self.value.get(matches) {
-                    Err(e) => Err(either::Right(e)),
-                    Ok(o) => Ok(either::Right(o)),
+                    Err(e) => Err(Either::Right(e)),
+                    Ok(o) => Ok(Either::Right(o)),
                 },
             },
         }
@@ -444,7 +457,7 @@ pub enum TryMapError<E, F> {
     MapFailed(F),
 }
 
-impl<E: Debug + Display, F: Debug + Display> Display for TryMapError<E, F> {
+impl<E: Display, F: Display> Display for TryMapError<E, F> {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
             TryMapError::MapFailed(fail) => fmt::Display::fmt(&fail, f),
@@ -533,7 +546,7 @@ pub struct Join<A, B> {
     b: B,
 }
 
-pub type JoinError<A, B> = either::Either<A, B>;
+pub type JoinError<A, B> = Either<A, B>;
 
 impl<A, B> Arg for Join<A, B>
 where
@@ -551,8 +564,8 @@ where
     }
     fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
         Ok((
-            self.a.get(matches).map_err(either::Left)?,
-            self.b.get(matches).map_err(either::Right)?,
+            self.a.get(matches).map_err(Either::Left)?,
+            self.b.get(matches).map_err(Either::Right)?,
         ))
     }
 }
@@ -572,7 +585,7 @@ pub enum OptionJoinError<A, B> {
     },
 }
 
-impl<A: Debug + Display, B: Debug + Display> Display for OptionJoinError<A, B> {
+impl<A: Display, B: Display> Display for OptionJoinError<A, B> {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
             OptionJoinError::Left(a) => fmt::Display::fmt(&a, f),
@@ -627,7 +640,7 @@ where
     }
 }
 
-pub struct Either<A, B> {
+pub struct EitherCombinator<A, B> {
     a: A,
     b: B,
 }
@@ -642,7 +655,7 @@ pub enum EitherError<A, B> {
     },
 }
 
-impl<A: Debug + Display, B: Debug + Display> Display for EitherError<A, B> {
+impl<A: Display, B: Display> Display for EitherError<A, B> {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
             EitherError::Left(a) => fmt::Display::fmt(&a, f),
@@ -671,12 +684,12 @@ fn either_update_options(
     b.update_options(opts, notes.push(b_note));
 }
 
-impl<T, U, A, B> Arg for Either<A, B>
+impl<T, U, A, B> Arg for EitherCombinator<A, B>
 where
     A: Arg<Item = Option<T>>,
     B: Arg<Item = Option<U>>,
 {
-    type Item = Option<either::Either<T, U>>;
+    type Item = Option<Either<T, U>>;
     type Error = EitherError<A::Error, B::Error>;
     fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
         either_update_options(&self.a, &self.b, opts, notes);
@@ -692,8 +705,8 @@ where
                 left_name: self.a.name(),
                 right_name: self.b.name(),
             }),
-            (Some(a), None) => Ok(Some(either::Left(a))),
-            (None, Some(b)) => Ok(Some(either::Right(b))),
+            (Some(a), None) => Ok(Some(Either::Left(a))),
+            (None, Some(b)) => Ok(Some(Either::Right(b))),
             (None, None) => Ok(None),
         }
     }
@@ -768,7 +781,7 @@ pub enum RequiredError<E> {
     MissingRequiredArg { name: String },
 }
 
-impl<E: Debug + Display> Display for RequiredError<E> {
+impl<E: Display> Display for RequiredError<E> {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
             RequiredError::Other(e) => fmt::Display::fmt(&e, f),
@@ -813,9 +826,7 @@ pub enum ConvertError<O, T, E> {
     ConversionFailed { name: String, error: E, value: T },
 }
 
-impl<O: Debug + Display, T: Debug + Display, E: Debug + Display> Display
-    for ConvertError<O, T, E>
-{
+impl<O: Display, T: Display, E: Display> Display for ConvertError<O, T, E> {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
             ConvertError::Other(e) => fmt::Display::fmt(&e, f),
@@ -1108,12 +1119,12 @@ pub trait ArgOptionExt: Arg + ArgExt {
         OptionJoin { a: self, b }
     }
 
-    fn either<B>(self, b: B) -> Either<Self, B>
+    fn either<B>(self, b: B) -> EitherCombinator<Self, B>
     where
         B: ArgOptionExt,
         Self: Sized,
     {
-        Either { a: self, b }
+        EitherCombinator { a: self, b }
     }
 
     fn either_homogeneous<B>(self, b: B) -> EitherHomogeneous<Self, B>

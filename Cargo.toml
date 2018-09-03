@@ -11,4 +11,3 @@ documentation = "https://docs.rs/arg-combinators"
 
 [dependencies]
 getopts = "0.2"
-either = "1.5"
