@@ -180,7 +180,7 @@ impl UsageWithProgramName {
     }
 }
 
-pub trait Param {
+pub trait Arg {
     type Item;
     type Error: Debug + Display;
     fn update_options(&self, opts: &mut getopts::Options, notes: Notes);
@@ -237,7 +237,7 @@ pub trait Param {
 }
 
 #[derive(Default)]
-pub struct Arg {
+pub struct Opt {
     pub short: String,
     pub long: String,
     pub hint: String,
@@ -281,7 +281,7 @@ impl Never {
     }
 }
 
-impl Param for Arg {
+impl Arg for Opt {
     type Item = Option<String>;
     type Error = Never;
     fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
@@ -302,7 +302,7 @@ impl Param for Arg {
     }
 }
 
-impl Param for Flag {
+impl Arg for Flag {
     type Item = bool;
     type Error = Never;
     fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
@@ -323,9 +323,9 @@ pub struct Map<A, F> {
     f: F,
 }
 
-impl<A, U, F> Param for Map<A, F>
+impl<A, U, F> Arg for Map<A, F>
 where
-    A: Param,
+    A: Arg,
     F: Fn(A::Item) -> U,
 {
     type Item = U;
@@ -351,9 +351,9 @@ pub struct WithHelp<V> {
     value: V,
 }
 
-impl<V> Param for WithHelp<V>
+impl<V> Arg for WithHelp<V>
 where
-    V: Param,
+    V: Arg,
 {
     type Item = HelpOr<V::Item>;
     type Error = V::Error;
@@ -378,10 +378,10 @@ pub struct Otherwise<C, V> {
     value: V,
 }
 
-impl<T, C, V> Param for Otherwise<C, V>
+impl<T, C, V> Arg for Otherwise<C, V>
 where
-    C: Param<Item = Option<T>>,
-    V: Param,
+    C: Arg<Item = Option<T>>,
+    V: Arg,
 {
     type Item = either::Either<T, V::Item>;
     type Error = either::Either<C::Error, V::Error>;
@@ -411,10 +411,10 @@ pub struct SomeIf<A, T> {
     value: T,
 }
 
-impl<A, T> Param for SomeIf<A, T>
+impl<A, T> Arg for SomeIf<A, T>
 where
     T: Clone,
-    A: Param<Item = bool>,
+    A: Arg<Item = bool>,
 {
     type Item = Option<T>;
     type Error = A::Error;
@@ -453,9 +453,9 @@ impl<E: Debug + Display, F: Debug + Display> Display for TryMapError<E, F> {
     }
 }
 
-impl<A, U, E, F> Param for TryMap<A, F>
+impl<A, U, E, F> Arg for TryMap<A, F>
 where
-    A: Param,
+    A: Arg,
     E: Debug + Display,
     F: Fn(A::Item) -> Result<U, E>,
 {
@@ -480,9 +480,9 @@ pub struct OptMap<A, F> {
     f: F,
 }
 
-impl<A, T, U, F> Param for OptMap<A, F>
+impl<A, T, U, F> Arg for OptMap<A, F>
 where
-    A: Param<Item = Option<T>>,
+    A: Arg<Item = Option<T>>,
     F: Fn(T) -> U,
 {
     type Item = Option<U>;
@@ -503,9 +503,9 @@ pub struct OptTryMap<A, F> {
     f: F,
 }
 
-impl<T, A, U, E, F> Param for OptTryMap<A, F>
+impl<T, A, U, E, F> Arg for OptTryMap<A, F>
 where
-    A: Param<Item = Option<T>>,
+    A: Arg<Item = Option<T>>,
     E: Debug + Display,
     F: Fn(T) -> Result<U, E>,
 {
@@ -535,10 +535,10 @@ pub struct Join<A, B> {
 
 pub type JoinError<A, B> = either::Either<A, B>;
 
-impl<A, B> Param for Join<A, B>
+impl<A, B> Arg for Join<A, B>
 where
-    A: Param,
-    B: Param,
+    A: Arg,
+    B: Arg,
 {
     type Item = (A::Item, B::Item);
     type Error = JoinError<A::Error, B::Error>;
@@ -566,7 +566,7 @@ pub struct Codepend<A, B> {
 pub enum CodependError<A, B> {
     Left(A),
     Right(B),
-    MissingCodependantParam {
+    MissingCodependantArg {
         supplied_name: String,
         missing_name: String,
     },
@@ -577,7 +577,7 @@ impl<A: Debug + Display, B: Debug + Display> Display for CodependError<A, B> {
         match self {
             CodependError::Left(a) => fmt::Display::fmt(&a, f),
             CodependError::Right(b) => fmt::Display::fmt(&b, f),
-            CodependError::MissingCodependantParam {
+            CodependError::MissingCodependantArg {
                 supplied_name,
                 missing_name,
             } => write!(
@@ -590,10 +590,10 @@ impl<A: Debug + Display, B: Debug + Display> Display for CodependError<A, B> {
     }
 }
 
-impl<T, U, A, B> Param for Codepend<A, B>
+impl<T, U, A, B> Arg for Codepend<A, B>
 where
-    A: Param<Item = Option<T>>,
-    B: Param<Item = Option<U>>,
+    A: Arg<Item = Option<T>>,
+    B: Arg<Item = Option<U>>,
 {
     type Item = Option<(T, U)>;
     type Error = CodependError<A::Error, B::Error>;
@@ -615,11 +615,11 @@ where
         match (maybe_a, maybe_b) {
             (Some(a), Some(b)) => Ok(Some((a, b))),
             (None, None) => Ok(None),
-            (Some(_), None) => Err(CodependError::MissingCodependantParam {
+            (Some(_), None) => Err(CodependError::MissingCodependantArg {
                 supplied_name: self.a.name(),
                 missing_name: self.b.name(),
             }),
-            (None, Some(_)) => Err(CodependError::MissingCodependantParam {
+            (None, Some(_)) => Err(CodependError::MissingCodependantArg {
                 supplied_name: self.b.name(),
                 missing_name: self.a.name(),
             }),
@@ -636,7 +636,7 @@ pub struct Either<A, B> {
 pub enum EitherError<A, B> {
     Left(A),
     Right(B),
-    MultipleMutuallyExclusiveParams {
+    MultipleMutuallyExclusiveArgs {
         left_name: String,
         right_name: String,
     },
@@ -647,7 +647,7 @@ impl<A: Debug + Display, B: Debug + Display> Display for EitherError<A, B> {
         match self {
             EitherError::Left(a) => fmt::Display::fmt(&a, f),
             EitherError::Right(b) => fmt::Display::fmt(&b, f),
-            EitherError::MultipleMutuallyExclusiveParams {
+            EitherError::MultipleMutuallyExclusiveArgs {
                 left_name,
                 right_name,
             } => write!(
@@ -660,8 +660,8 @@ impl<A: Debug + Display, B: Debug + Display> Display for EitherError<A, B> {
 }
 
 fn either_update_options(
-    a: &impl Param,
-    b: &impl Param,
+    a: &impl Arg,
+    b: &impl Arg,
     opts: &mut getopts::Options,
     notes: Notes,
 ) {
@@ -671,10 +671,10 @@ fn either_update_options(
     b.update_options(opts, notes.push(b_note));
 }
 
-impl<T, U, A, B> Param for Either<A, B>
+impl<T, U, A, B> Arg for Either<A, B>
 where
-    A: Param<Item = Option<T>>,
-    B: Param<Item = Option<U>>,
+    A: Arg<Item = Option<T>>,
+    B: Arg<Item = Option<U>>,
 {
     type Item = Option<either::Either<T, U>>;
     type Error = EitherError<A::Error, B::Error>;
@@ -688,7 +688,7 @@ where
         let maybe_a = self.a.get(matches).map_err(EitherError::Left)?;
         let maybe_b = self.b.get(matches).map_err(EitherError::Right)?;
         match (maybe_a, maybe_b) {
-            (Some(_), Some(_)) => Err(EitherError::MultipleMutuallyExclusiveParams {
+            (Some(_), Some(_)) => Err(EitherError::MultipleMutuallyExclusiveArgs {
                 left_name: self.a.name(),
                 right_name: self.b.name(),
             }),
@@ -704,10 +704,10 @@ pub struct EitherHomogeneous<A, B> {
     b: B,
 }
 
-impl<T, A, B> Param for EitherHomogeneous<A, B>
+impl<T, A, B> Arg for EitherHomogeneous<A, B>
 where
-    A: Param<Item = Option<T>>,
-    B: Param<Item = Option<T>>,
+    A: Arg<Item = Option<T>>,
+    B: Arg<Item = Option<T>>,
 {
     type Item = Option<T>;
     type Error = EitherError<A::Error, B::Error>;
@@ -721,7 +721,7 @@ where
         let maybe_a = self.a.get(matches).map_err(EitherError::Left)?;
         let maybe_b = self.b.get(matches).map_err(EitherError::Right)?;
         match (maybe_a, maybe_b) {
-            (Some(_), Some(_)) => Err(EitherError::MultipleMutuallyExclusiveParams {
+            (Some(_), Some(_)) => Err(EitherError::MultipleMutuallyExclusiveArgs {
                 left_name: self.a.name(),
                 right_name: self.b.name(),
             }),
@@ -737,10 +737,10 @@ pub struct WithDefault<P, T> {
     default: T,
 }
 
-impl<P, T> Param for WithDefault<P, T>
+impl<P, T> Arg for WithDefault<P, T>
 where
     T: Clone + Display,
-    P: Param<Item = Option<T>>,
+    P: Arg<Item = Option<T>>,
 {
     type Item = T;
     type Error = P::Error;
@@ -765,23 +765,23 @@ pub struct Required<P> {
 #[derive(Debug)]
 pub enum RequiredError<E> {
     Other(E),
-    MissingRequiredParam { name: String },
+    MissingRequiredArg { name: String },
 }
 
 impl<E: Debug + Display> Display for RequiredError<E> {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
             RequiredError::Other(e) => fmt::Display::fmt(&e, f),
-            RequiredError::MissingRequiredParam { name } => {
+            RequiredError::MissingRequiredArg { name } => {
                 write!(f, "{} is required but not supplied", name)
             }
         }
     }
 }
 
-impl<P, T> Param for Required<P>
+impl<P, T> Arg for Required<P>
 where
-    P: Param<Item = Option<T>>,
+    P: Arg<Item = Option<T>>,
 {
     type Item = T;
     type Error = RequiredError<P::Error>;
@@ -796,7 +796,7 @@ where
         self.param
             .get(matches)
             .map_err(RequiredError::Other)?
-            .ok_or(RequiredError::MissingRequiredParam {
+            .ok_or(RequiredError::MissingRequiredArg {
                 name: self.param.name(),
             })
     }
@@ -832,9 +832,9 @@ impl<O: Debug + Display, T: Debug + Display, E: Debug + Display> Display
     }
 }
 
-impl<A, F, U, E> Param for Convert<A, F>
+impl<A, F, U, E> Arg for Convert<A, F>
 where
-    A: Param,
+    A: Arg,
     A::Item: Clone + Debug + Display,
     E: Debug + Display,
     F: Fn(&A::Item) -> Result<U, E>,
@@ -866,11 +866,11 @@ pub struct OptConvert<A, F> {
     f: F,
 }
 
-impl<T, A, U, F, E> Param for OptConvert<A, F>
+impl<T, A, U, F, E> Arg for OptConvert<A, F>
 where
     T: Clone + Debug + Display,
     E: Clone + Debug + Display,
-    A: Param<Item = Option<T>>,
+    A: Arg<Item = Option<T>>,
     F: Fn(T) -> Result<U, E>,
 {
     type Item = Option<U>;
@@ -903,9 +903,9 @@ pub struct Rename<P> {
     name: String,
 }
 
-impl<P> Param for Rename<P>
+impl<P> Arg for Rename<P>
 where
-    P: Param,
+    P: Arg,
 {
     type Item = P::Item;
     type Error = P::Error;
@@ -926,9 +926,9 @@ pub struct AddNote<P> {
     note: Note,
 }
 
-impl<P> Param for AddNote<P>
+impl<P> Arg for AddNote<P>
 where
-    P: Param,
+    P: Arg,
 {
     type Item = P::Item;
     type Error = P::Error;
@@ -950,9 +950,9 @@ pub struct SetNotesToDocument<P> {
     which_notes_to_document: WhichNotes,
 }
 
-impl<P> Param for SetNotesToDocument<P>
+impl<P> Arg for SetNotesToDocument<P>
 where
-    P: Param,
+    P: Arg,
 {
     type Item = P::Item;
     type Error = P::Error;
@@ -977,7 +977,7 @@ pub struct Value<T> {
     value: T,
 }
 
-impl<T> Param for Value<T>
+impl<T> Arg for Value<T>
 where
     T: Clone,
 {
@@ -1001,7 +1001,7 @@ impl<T: Clone> Value<T> {
     }
 }
 
-pub trait ParamExt: Param {
+pub trait ArgExt: Arg {
     fn map<U, F>(self, f: F) -> Map<Self, F>
     where
         F: Fn(Self::Item) -> U,
@@ -1019,7 +1019,7 @@ pub trait ParamExt: Param {
     }
     fn join<B>(self, b: B) -> Join<Self, B>
     where
-        B: Param,
+        B: Arg,
         Self: Sized,
     {
         Join { a: self, b }
@@ -1080,13 +1080,13 @@ pub trait ParamExt: Param {
     }
 }
 
-impl<P: ?Sized> ParamExt for P
+impl<P: ?Sized> ArgExt for P
 where
-    P: Param,
+    P: Arg,
 {
 }
 
-pub trait ParamOptExt: Param + ParamExt {
+pub trait ArgOptExt: Arg + ArgExt {
     type OptItem;
 
     fn opt_map<U, F>(self, f: F) -> OptMap<Self, F>
@@ -1108,7 +1108,7 @@ pub trait ParamOptExt: Param + ParamExt {
 
     fn codepend<B>(self, b: B) -> Codepend<Self, B>
     where
-        B: ParamOptExt,
+        B: ArgOptExt,
         Self: Sized,
     {
         Codepend { a: self, b }
@@ -1116,7 +1116,7 @@ pub trait ParamOptExt: Param + ParamExt {
 
     fn either<B>(self, b: B) -> Either<Self, B>
     where
-        B: ParamOptExt,
+        B: ArgOptExt,
         Self: Sized,
     {
         Either { a: self, b }
@@ -1124,7 +1124,7 @@ pub trait ParamOptExt: Param + ParamExt {
 
     fn either_homogeneous<B>(self, b: B) -> EitherHomogeneous<Self, B>
     where
-        B: ParamOptExt<OptItem = Self::OptItem>,
+        B: ArgOptExt<OptItem = Self::OptItem>,
         Self: Sized,
     {
         EitherHomogeneous { a: self, b }
@@ -1159,7 +1159,7 @@ pub trait ParamOptExt: Param + ParamExt {
 
     fn otherwise<B>(self, b: B) -> Otherwise<Self, B>
     where
-        B: Param,
+        B: Arg,
         Self: Sized,
     {
         Otherwise {
@@ -1169,16 +1169,16 @@ pub trait ParamOptExt: Param + ParamExt {
     }
 }
 
-impl<T, P: ?Sized> ParamOptExt for P
+impl<T, P: ?Sized> ArgOptExt for P
 where
-    P: Param<Item = Option<T>>,
+    P: Arg<Item = Option<T>>,
 {
     type OptItem = T;
 }
 
 pub type UnitOption<T> = SomeIf<T, ()>;
 
-pub trait ParamBoolExt: Param + ParamExt {
+pub trait ArgBoolExt: Arg + ArgExt {
     fn some_if<T>(self, value: T) -> SomeIf<Self, T>
     where
         Self: Sized,
@@ -1199,21 +1199,17 @@ pub trait ParamBoolExt: Param + ParamExt {
     }
 }
 
-impl<P: ?Sized> ParamBoolExt for P
+impl<P: ?Sized> ArgBoolExt for P
 where
-    P: Param<Item = bool>,
+    P: Arg<Item = bool>,
 {
 }
 
-pub fn value<T: Clone>(value: T, name: &str) -> impl Param<Item = T, Error = Never> {
+pub fn value<T: Clone>(value: T, name: &str) -> impl Arg<Item = T, Error = Never> {
     Value::new(value, name)
 }
 
-pub fn flag(
-    short: &str,
-    long: &str,
-    doc: &str,
-) -> impl Param<Item = bool, Error = Never> {
+pub fn flag(short: &str, long: &str, doc: &str) -> impl Arg<Item = bool, Error = Never> {
     Flag {
         short: short.to_string(),
         long: long.to_string(),
@@ -1221,13 +1217,13 @@ pub fn flag(
     }
 }
 
-fn arg_opt_str(
+fn opt_str(
     short: &str,
     long: &str,
     doc: &str,
     hint: &str,
-) -> impl Param<Item = Option<String>> {
-    Arg {
+) -> impl Arg<Item = Option<String>> {
+    Opt {
         short: short.to_string(),
         long: long.to_string(),
         doc: doc.to_string(),
@@ -1235,83 +1231,88 @@ fn arg_opt_str(
     }
 }
 
-pub fn arg_opt_by<T, E, F>(
+pub fn opt_by<T, E, F>(
     short: &str,
     long: &str,
     doc: &str,
     hint: &str,
     parse: F,
-) -> impl Param<Item = Option<T>>
+) -> impl Arg<Item = Option<T>>
 where
     E: Clone + Debug + Display,
     F: Fn(String) -> Result<T, E>,
 {
-    arg_opt_str(short, long, doc, hint).opt_convert(parse)
+    opt_str(short, long, doc, hint).opt_convert(parse)
 }
 
-pub fn arg_req_by<T, E, F>(
+pub fn opt_required_by<T, E, F>(
     short: &str,
     long: &str,
     doc: &str,
     hint: &str,
     parse: F,
-) -> impl Param<Item = T>
+) -> impl Arg<Item = T>
 where
     E: Clone + Debug + Display,
     F: Fn(String) -> Result<T, E>,
 {
-    arg_opt_by(short, long, doc, hint, parse).required()
+    opt_by(short, long, doc, hint, parse).required()
 }
 
-pub fn arg_opt_default_by<T, E, F>(
+pub fn opt_default_by<T, E, F>(
     short: &str,
     long: &str,
     doc: &str,
     hint: &str,
     default: T,
     parse: F,
-) -> impl Param<Item = T>
+) -> impl Arg<Item = T>
 where
     E: Clone + Debug + Display,
     T: Clone + FromStr + Display,
     F: Fn(String) -> Result<T, E>,
 {
-    arg_opt_by(short, long, doc, hint, parse).with_default(default)
+    opt_by(short, long, doc, hint, parse).with_default(default)
 }
 
-pub fn arg_opt<T>(
+pub fn opt<T>(
     short: &str,
     long: &str,
     doc: &str,
     hint: &str,
-) -> impl Param<Item = Option<T>>
+) -> impl Arg<Item = Option<T>>
 where
     T: FromStr,
     <T as FromStr>::Err: Clone + Debug + Display,
 {
-    arg_opt_by(short, long, doc, hint, |s| s.parse())
+    opt_by(short, long, doc, hint, |s| s.parse())
 }
 
-pub fn arg_req<T>(short: &str, long: &str, doc: &str, hint: &str) -> impl Param<Item = T>
+pub fn opt_required<T>(
+    short: &str,
+    long: &str,
+    doc: &str,
+    hint: &str,
+) -> impl Arg<Item = T>
 where
     T: FromStr,
     <T as FromStr>::Err: Clone + Debug + Display,
 {
-    arg_opt(short, long, doc, hint).required()
+    opt(short, long, doc, hint).required()
 }
 
-pub fn arg_opt_default<T>(
+pub fn opt_default<T>(
     short: &str,
     long: &str,
     doc: &str,
     hint: &str,
     default: T,
-) -> impl Param<Item = T>
+) -> impl Arg<Item = T>
 where
     T: Clone + FromStr + Display,
     <T as FromStr>::Err: Clone + Debug + Display,
 {
-    arg_opt(short, long, doc, hint).with_default(default)
+    opt(short, long, doc, hint).with_default(default)
 }
 
 #[macro_export]
@@ -1398,8 +1399,8 @@ mod tests {
             title: String,
         }
 
-        let dimensions = arg_opt("w", "width", "INT", "width")
-            .codepend(arg_opt("e", "height", "INT", "height"))
+        let dimensions = opt("w", "width", "INT", "width")
+            .codepend(opt("e", "height", "INT", "height"))
             .opt_map(|(width, height)| WindowSize::Dimensions { width, height });
 
         let fullscreen =
@@ -1412,7 +1413,7 @@ mod tests {
                 height: 480,
             });
 
-        let title = arg_req("t", "title", "STRING", "title");
+        let title = opt_required("t", "title", "STRING", "title");
 
         let param = title
             .join(window_size)
@@ -1518,10 +1519,10 @@ mod tests {
     fn map_params() {
         let param = map_params! {
             let {
-                foo = arg_req("f", "foo", "", "");
-                bar = arg_req("b", "bar", "", "");
+                foo = opt_required("f", "foo", "", "");
+                bar = opt_required("b", "bar", "", "");
                 baz = flag("l", "baz-left", "").join(flag("r", "baz-right", ""));
-                qux = arg_opt("q", "qux", "", "");
+                qux = opt("q", "qux", "", "");
             } in {
                 Args { foo, bar, baz, qux }
             }
@@ -1558,10 +1559,10 @@ mod tests {
     fn join_params() {
         let baz = flag("l", "baz-left", "").join(flag("r", "baz-right", ""));
         let param = join_params! {
-            arg_req("f", "foo", "", ""),
-            arg_req("b", "bar", "", ""),
+            opt_required("f", "foo", "", ""),
+            opt_required("b", "bar", "", ""),
             baz,
-            arg_opt("q", "qux", "", ""),
+            opt("q", "qux", "", ""),
         }.map(|(foo, bar, baz, qux)| Args {
             foo,
             bar,
