@@ -10,6 +10,9 @@ pub mod combinators;
 
 use combinators::*;
 
+// It's convenient for this to be in the top level.
+pub use combinators::HelpOr;
+
 #[derive(Debug)]
 pub enum TopLevelError<E> {
     Getopts(getopts::Fail),
