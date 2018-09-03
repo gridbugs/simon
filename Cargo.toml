@@ -1,13 +1,13 @@
 [package]
-name = "argle"
-description = "Command line argument combinator library"
-version = "0.1.2"
+name = "arg_combinators"
+description = "Command line argument combinators"
+version = "0.1.0"
 authors = ["Stephen Sherratt <sfsherratt@gmail.com>"]
 license = "MIT"
 readme = "README.md"
-homepage = "https://github.com/stevebob/argle.git"
-repository = "https://github.com/stevebob/argle.git"
-documentation = "https://docs.rs/argle"
+homepage = "https://github.com/stevebob/arg-combinators.git"
+repository = "https://github.com/stevebob/arg-combinators.git"
+documentation = "https://docs.rs/arg-combinators"
 
 [dependencies]
 getopts = "0.2"
