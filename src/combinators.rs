@@ -12,8 +12,8 @@ where
 {
     type Item = U;
     type Error = A::Error;
-    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        self.arg.update_options(opts, notes);
+    fn update_options(&self, opts: &mut getopts::Options) {
+        self.arg.update_options(opts);
     }
     fn name(&self) -> String {
         self.arg.name()
@@ -39,9 +39,9 @@ where
 {
     type Item = HelpOr<V::Item>;
     type Error = V::Error;
-    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        self.cond.update_options(opts, notes.clone());
-        self.value.update_options(opts, notes);
+    fn update_options(&self, opts: &mut getopts::Options) {
+        self.cond.update_options(opts);
+        self.value.update_options(opts);
     }
     fn name(&self) -> String {
         self.value.name()
@@ -67,9 +67,9 @@ where
 {
     type Item = Either<T, V::Item>;
     type Error = Either<C::Error, V::Error>;
-    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        self.cond.update_options(opts, notes.clone());
-        self.value.update_options(opts, notes);
+    fn update_options(&self, opts: &mut getopts::Options) {
+        self.cond.update_options(opts);
+        self.value.update_options(opts);
     }
     fn name(&self) -> String {
         self.value.name()
@@ -100,8 +100,8 @@ where
 {
     type Item = Option<T>;
     type Error = A::Error;
-    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        self.arg.update_options(opts, notes);
+    fn update_options(&self, opts: &mut getopts::Options) {
+        self.arg.update_options(opts);
     }
     fn name(&self) -> String {
         self.arg.name()
@@ -143,8 +143,8 @@ where
 {
     type Item = U;
     type Error = TryMapError<A::Error, E>;
-    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        self.arg.update_options(opts, notes);
+    fn update_options(&self, opts: &mut getopts::Options) {
+        self.arg.update_options(opts);
     }
     fn name(&self) -> String {
         self.arg.name()
@@ -169,8 +169,8 @@ where
 {
     type Item = Option<U>;
     type Error = A::Error;
-    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        self.arg.update_options(opts, notes);
+    fn update_options(&self, opts: &mut getopts::Options) {
+        self.arg.update_options(opts);
     }
     fn name(&self) -> String {
         self.arg.name()
@@ -193,8 +193,8 @@ where
 {
     type Item = Option<U>;
     type Error = TryMapError<A::Error, E>;
-    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        self.arg.update_options(opts, notes);
+    fn update_options(&self, opts: &mut getopts::Options) {
+        self.arg.update_options(opts);
     }
     fn name(&self) -> String {
         self.arg.name()
@@ -224,9 +224,9 @@ where
 {
     type Item = (A::Item, B::Item);
     type Error = JoinError<A::Error, B::Error>;
-    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        self.a.update_options(opts, notes.clone());
-        self.b.update_options(opts, notes);
+    fn update_options(&self, opts: &mut getopts::Options) {
+        self.a.update_options(opts);
+        self.b.update_options(opts);
     }
     fn name(&self) -> String {
         format!("({} and {})", self.a.name(), self.b.name())
@@ -279,14 +279,9 @@ where
 {
     type Item = Option<(T, U)>;
     type Error = OptionJoinError<A::Error, B::Error>;
-    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        let a_note =
-            Note::Dependency(format!("must be specified with {}", self.b.name()));
-        let b_note =
-            Note::Dependency(format!("must be specified with {}", self.a.name()));
-        self.a
-            .update_options(opts, notes.clone().push(a_note));
-        self.b.update_options(opts, notes.push(b_note));
+    fn update_options(&self, opts: &mut getopts::Options) {
+        self.a.update_options(opts);
+        self.b.update_options(opts);
     }
     fn name(&self) -> String {
         format!("({} and {})", self.a.name(), self.b.name())
@@ -341,16 +336,9 @@ impl<A: Display, B: Display> Display for EitherError<A, B> {
     }
 }
 
-fn either_update_options(
-    a: &impl Arg,
-    b: &impl Arg,
-    opts: &mut getopts::Options,
-    notes: Notes,
-) {
-    let a_note = Note::Dependency(format!("mutually exclusive with {}", b.name()));
-    let b_note = Note::Dependency(format!("mutually exclusive with {}", a.name()));
-    a.update_options(opts, notes.clone().push(a_note));
-    b.update_options(opts, notes.push(b_note));
+fn either_update_options(a: &impl Arg, b: &impl Arg, opts: &mut getopts::Options) {
+    a.update_options(opts);
+    b.update_options(opts);
 }
 
 impl<T, U, A, B> Arg for EitherCombinator<A, B>
@@ -360,8 +348,8 @@ where
 {
     type Item = Option<Either<T, U>>;
     type Error = EitherError<A::Error, B::Error>;
-    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        either_update_options(&self.a, &self.b, opts, notes);
+    fn update_options(&self, opts: &mut getopts::Options) {
+        either_update_options(&self.a, &self.b, opts);
     }
     fn name(&self) -> String {
         format!("({} or {})", self.a.name(), self.b.name())
@@ -393,8 +381,8 @@ where
 {
     type Item = Option<T>;
     type Error = EitherError<A::Error, B::Error>;
-    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        either_update_options(&self.a, &self.b, opts, notes);
+    fn update_options(&self, opts: &mut getopts::Options) {
+        either_update_options(&self.a, &self.b, opts);
     }
     fn name(&self) -> String {
         format!("({} or {})", self.a.name(), self.b.name())
@@ -421,14 +409,13 @@ pub struct WithDefault<P, T> {
 
 impl<P, T> Arg for WithDefault<P, T>
 where
-    T: Clone + Display,
+    T: Clone,
     P: Arg<Item = Option<T>>,
 {
     type Item = T;
     type Error = P::Error;
-    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        let note = Note::DefaultValue(format!("{}", self.default));
-        self.arg.update_options(opts, notes.push(note));
+    fn update_options(&self, opts: &mut getopts::Options) {
+        self.arg.update_options(opts);
     }
     fn name(&self) -> String {
         self.arg.name()
@@ -467,20 +454,18 @@ where
 {
     type Item = T;
     type Error = RequiredError<P::Error>;
-    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        self.arg
-            .update_options(opts, notes.push(Note::Required));
+    fn update_options(&self, opts: &mut getopts::Options) {
+        self.arg.update_options(opts);
     }
     fn name(&self) -> String {
         self.arg.name()
     }
     fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
-        self.arg
-            .get(matches)
-            .map_err(RequiredError::Other)?
-            .ok_or(RequiredError::MissingRequiredArg {
+        self.arg.get(matches).map_err(RequiredError::Other)?.ok_or(
+            RequiredError::MissingRequiredArg {
                 name: self.arg.name(),
-            })
+            },
+        )
     }
 }
 
@@ -499,11 +484,7 @@ impl<O: Display, T: Display, E: Display> Display for ConvertError<O, T, E> {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
             ConvertError::Other(e) => fmt::Display::fmt(&e, f),
-            ConvertError::ConversionFailed {
-                name,
-                error,
-                value,
-            } => write!(
+            ConvertError::ConversionFailed { name, error, value } => write!(
                 f,
                 "invalid value \"{}\" supplied for \"{}\" ({})",
                 value, name, error
@@ -521,8 +502,8 @@ where
 {
     type Item = U;
     type Error = ConvertError<A::Error, A::Item, E>;
-    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        self.arg.update_options(opts, notes);
+    fn update_options(&self, opts: &mut getopts::Options) {
+        self.arg.update_options(opts);
     }
     fn name(&self) -> String {
         self.arg.name()
@@ -555,8 +536,8 @@ where
 {
     type Item = Option<U>;
     type Error = ConvertError<A::Error, T, E>;
-    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        self.arg.update_options(opts, notes);
+    fn update_options(&self, opts: &mut getopts::Options) {
+        self.arg.update_options(opts);
     }
     fn name(&self) -> String {
         self.arg.name()
@@ -590,62 +571,11 @@ where
     type Item = P::Item;
     type Error = P::Error;
 
-    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        self.arg.update_options(opts, notes);
+    fn update_options(&self, opts: &mut getopts::Options) {
+        self.arg.update_options(opts);
     }
     fn name(&self) -> String {
         self.name.clone()
-    }
-    fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
-        self.arg.get(matches)
-    }
-}
-
-pub struct AddNote<P> {
-    pub(crate) arg: P,
-    pub(crate) note: Note,
-}
-
-impl<P> Arg for AddNote<P>
-where
-    P: Arg,
-{
-    type Item = P::Item;
-    type Error = P::Error;
-
-    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        self.arg
-            .update_options(opts, notes.push(self.note.clone()));
-    }
-    fn name(&self) -> String {
-        self.arg.name()
-    }
-    fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
-        self.arg.get(matches)
-    }
-}
-
-pub struct SetNotesToDocument<P> {
-    pub(crate) arg: P,
-    pub(crate) which_notes_to_document: WhichNotes,
-}
-
-impl<P> Arg for SetNotesToDocument<P>
-where
-    P: Arg,
-{
-    type Item = P::Item;
-    type Error = P::Error;
-
-    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        let notes = Notes {
-            which_notes_to_document: self.which_notes_to_document,
-            ..notes
-        };
-        self.arg.update_options(opts, notes);
-    }
-    fn name(&self) -> String {
-        self.arg.name()
     }
     fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
         self.arg.get(matches)
@@ -663,7 +593,7 @@ where
 {
     type Item = T;
     type Error = Never;
-    fn update_options(&self, _opts: &mut getopts::Options, _notes: Notes) {}
+    fn update_options(&self, _opts: &mut getopts::Options) {}
     fn name(&self) -> String {
         self.name.clone()
     }

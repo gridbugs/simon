@@ -2,8 +2,7 @@ extern crate getopts;
 
 use std::env;
 use std::ffi::OsStr;
-use std::fmt::{self, Debug, Display, Write};
-use std::rc::Rc;
+use std::fmt::{self, Debug, Display};
 use std::str::FromStr;
 
 pub mod combinators;
@@ -24,123 +23,6 @@ impl<E: Display> Display for TopLevelError<E> {
         match self {
             TopLevelError::Getopts(fail) => fmt::Display::fmt(&fail, f),
             TopLevelError::Other(other) => fmt::Display::fmt(&other, f),
-        }
-    }
-}
-
-impl<T> From<getopts::Fail> for TopLevelError<T> {
-    fn from(f: getopts::Fail) -> Self {
-        TopLevelError::Getopts(f)
-    }
-}
-
-#[derive(Clone)]
-pub enum Note {
-    DefaultValue(String),
-    Dependency(String),
-    Required,
-}
-
-#[must_use]
-#[derive(Clone)]
-enum NoteList {
-    Empty,
-    Cons(Rc<(Note, NoteList)>),
-}
-
-#[derive(Clone, Copy)]
-pub struct WhichNotes {
-    pub default_value: bool,
-    pub dependency: bool,
-    pub required: bool,
-}
-
-impl WhichNotes {
-    pub fn all() -> Self {
-        Self {
-            default_value: true,
-            dependency: true,
-            required: true,
-        }
-    }
-    pub fn none() -> Self {
-        Self {
-            default_value: false,
-            dependency: false,
-            required: false,
-        }
-    }
-}
-impl Default for WhichNotes {
-    fn default() -> Self {
-        Self::all()
-    }
-}
-
-#[derive(Clone)]
-pub struct Notes {
-    list: NoteList,
-    pub which_notes_to_document: WhichNotes,
-}
-
-impl Note {
-    fn append(&self, which_notes: WhichNotes, buf: &mut String) {
-        match self {
-            Note::DefaultValue(d) => if which_notes.default_value {
-                write!(buf, "Default: {}", d).unwrap();
-            },
-            Note::Dependency(c) => if which_notes.dependency {
-                write!(buf, "Dependency: {}", c).unwrap();
-            },
-            Note::Required => if which_notes.required {
-                write!(buf, "Required").unwrap();
-            },
-        }
-    }
-}
-
-impl NoteList {
-    fn new() -> Self {
-        NoteList::Empty
-    }
-    fn push(self, note: Note) -> Self {
-        NoteList::Cons(Rc::new((note, self)))
-    }
-    fn append_rec(&self, sep: &str, which_notes: WhichNotes, buf: &mut String) {
-        match self {
-            NoteList::Empty => (),
-            NoteList::Cons(node) => {
-                write!(buf, "{}", sep).unwrap();
-                node.0.append(which_notes, buf);
-                node.1.append_rec(sep, which_notes, buf);
-            }
-        }
-    }
-}
-
-impl Notes {
-    pub fn new(which_notes_to_document: WhichNotes) -> Self {
-        Self {
-            list: NoteList::new(),
-            which_notes_to_document,
-        }
-    }
-    pub fn push(self, note: Note) -> Self {
-        Self {
-            list: self.list.push(note),
-            ..self
-        }
-    }
-    fn append(&self, buf: &mut String) {
-        match &self.list {
-            NoteList::Empty => (),
-            NoteList::Cons(node) => {
-                write!(buf, " (").unwrap();
-                node.0.append(self.which_notes_to_document, buf);
-                node.1
-                    .append_rec(", ", self.which_notes_to_document, buf);
-                write!(buf, ")").unwrap();
-            }
         }
     }
 }
@@ -188,19 +70,18 @@ impl UsageWithProgramName {
 pub trait Arg {
     type Item;
     type Error: Debug + Display;
-    fn update_options(&self, opts: &mut getopts::Options, notes: Notes);
+    fn update_options(&self, opts: &mut getopts::Options);
     fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error>;
     fn name(&self) -> String;
     fn parse<C: IntoIterator>(
         &self,
         args: C,
-        which_notes_to_document: WhichNotes,
     ) -> (Result<Self::Item, TopLevelError<Self::Error>>, Usage)
     where
         C::Item: AsRef<OsStr>,
     {
         let mut opts = getopts::Options::new();
-        self.update_options(&mut opts, Notes::new(which_notes_to_document));
+        self.update_options(&mut opts);
         (
             opts.parse(args)
                 .map_err(TopLevelError::Getopts)
@@ -210,7 +91,6 @@ pub trait Arg {
     }
     fn parse_env(
         &self,
-        which_notes_to_document: WhichNotes,
         program_name: ProgramName,
     ) -> (
         Result<Self::Item, TopLevelError<Self::Error>>,
@@ -222,7 +102,7 @@ pub trait Arg {
             ProgramName::ReadArg0 => args[0].clone(),
         };
 
-        let (result, usage) = self.parse(&args[1..], which_notes_to_document);
+        let (result, usage) = self.parse(&args[1..]);
 
         let usage_with_program_name = UsageWithProgramName {
             usage,
@@ -237,7 +117,7 @@ pub trait Arg {
         Result<Self::Item, TopLevelError<Self::Error>>,
         UsageWithProgramName,
     ) {
-        self.parse_env(Default::default(), Default::default())
+        self.parse_env(Default::default())
     }
 
     fn map<U, F>(self, f: F) -> Map<Self, F>
@@ -276,24 +156,6 @@ pub trait Arg {
         Self: Sized,
     {
         Rename { arg: self, name }
-    }
-    fn add_note(self, note: Note) -> AddNote<Self>
-    where
-        Self: Sized,
-    {
-        AddNote { arg: self, note }
-    }
-    fn set_notes_to_document(
-        self,
-        which_notes_to_document: WhichNotes,
-    ) -> SetNotesToDocument<Self>
-    where
-        Self: Sized,
-    {
-        SetNotesToDocument {
-            arg: self,
-            which_notes_to_document,
-        }
     }
     fn with_help(self, help: Flag) -> WithHelp<Self>
     where
@@ -375,13 +237,11 @@ impl<A: Display, B: Display> Display for Either<A, B> {
 impl Arg for Opt {
     type Item = Option<String>;
     type Error = Never;
-    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        let mut doc = self.doc.clone();
-        notes.append(&mut doc);
+    fn update_options(&self, opts: &mut getopts::Options) {
         opts.optopt(
             self.short.as_str(),
             self.long.as_str(),
-            doc.as_str(),
+            self.doc.as_str(),
             self.hint.as_str(),
         );
     }
@@ -396,10 +256,8 @@ impl Arg for Opt {
 impl Arg for Flag {
     type Item = bool;
     type Error = Never;
-    fn update_options(&self, opts: &mut getopts::Options, notes: Notes) {
-        let mut doc = self.doc.clone();
-        notes.append(&mut doc);
-        opts.optflag(self.short.as_str(), self.long.as_str(), doc.as_str());
+    fn update_options(&self, opts: &mut getopts::Options) {
+        opts.optflag(self.short.as_str(), self.long.as_str(), self.doc.as_str());
     }
     fn name(&self) -> String {
         self.long.clone()
@@ -460,10 +318,7 @@ pub trait ArgOption: Arg {
     where
         Self: Sized,
     {
-        WithDefault {
-            arg: self,
-            default,
-        }
+        WithDefault { arg: self, default }
     }
 
     fn required(self) -> Required<Self>
@@ -577,7 +432,13 @@ where
     E: Clone + Debug + Display,
     F: Fn(String) -> Result<T, E>,
 {
-    opt_by(short, long, doc, hint, parse).required()
+    opt_by(
+        short,
+        long,
+        format!("{} (required)", doc).as_str(),
+        hint,
+        parse,
+    ).required()
 }
 
 pub fn opt_default_by<T, E, F>(
@@ -593,7 +454,13 @@ where
     T: Clone + FromStr + Display,
     F: Fn(String) -> Result<T, E>,
 {
-    opt_by(short, long, doc, hint, parse).with_default(default)
+    opt_by(
+        short,
+        long,
+        format!("{} (default: {})", doc, default).as_str(),
+        hint,
+        parse,
+    ).with_default(default)
 }
 
 pub fn opt<T>(
@@ -619,7 +486,7 @@ where
     T: FromStr,
     <T as FromStr>::Err: Clone + Debug + Display,
 {
-    opt(short, long, doc, hint).required()
+    opt(short, long, format!("{} (required)", doc).as_str(), hint).required()
 }
 
 pub fn opt_default<T>(
@@ -633,7 +500,12 @@ where
     T: Clone + FromStr + Display,
     <T as FromStr>::Err: Clone + Debug + Display,
 {
-    opt(short, long, doc, hint).with_default(default)
+    opt(
+        short,
+        long,
+        format!("{} (default: {})", doc, default).as_str(),
+        hint,
+    ).with_default(default)
 }
 
 #[macro_export]
@@ -727,29 +599,26 @@ mod tests {
         let fullscreen =
             flag("f", "fullscreen", "fullscreen").some_if(WindowSize::FullScreen);
 
-        let window_size = dimensions
-            .either_homogeneous(fullscreen)
-            .with_default(WindowSize::Dimensions {
+        let window_size = dimensions.either_homogeneous(fullscreen).with_default(
+            WindowSize::Dimensions {
                 width: 640,
                 height: 480,
-            });
+            },
+        );
 
         let title = opt_required("t", "title", "STRING", "title");
 
         let arg = title
             .join(window_size)
-            .map(|(title, window_size)| Args {
-                title,
-                window_size,
-            });
+            .map(|(title, window_size)| Args { title, window_size });
 
-        match arg.parse(&[""], Default::default()).0 {
+        match arg.parse(&[""]).0 {
             Err(e) => assert_eq!(string_fmt(&e), "title is required but not supplied"),
             Ok(o) => panic!("{:?}", o),
         }
 
         match arg
-            .parse(&["--title", "foo", "--width", "potato"], Default::default())
+            .parse(&["--title", "foo", "--width", "potato"])
             .0
         {
             Err(e) => assert_eq!(
@@ -770,7 +639,6 @@ mod tests {
                     "2",
                     "--fullscreen",
                 ],
-                Default::default(),
             )
             .0
         {
@@ -781,10 +649,8 @@ mod tests {
             Ok(o) => panic!("{:?}", o),
         }
 
-        match arg.parse(
-            &["--title", "foo", "--width", "4", "--fullscreen"],
-            Default::default(),
-        ).0
+        match arg.parse(&["--title", "foo", "--width", "4", "--fullscreen"])
+            .0
         {
             Err(e) => assert_eq!(
                 string_fmt(&e),
@@ -795,11 +661,7 @@ mod tests {
         }
 
         assert_eq!(
-            arg.parse(
-                &["--title", "foo", "--fullscreen"],
-                Default::default()
-            ).0
-                .unwrap(),
+            arg.parse(&["--title", "foo", "--fullscreen"]).0.unwrap(),
             Args {
                 window_size: WindowSize::FullScreen,
                 title: "foo".to_string(),
@@ -807,10 +669,8 @@ mod tests {
         );
 
         assert_eq!(
-            arg.parse(
-                &["--title", "foo", "--width", "4", "--height", "2"],
-                Default::default()
-            ).0
+            arg.parse(&["--title", "foo", "--width", "4", "--height", "2"])
+                .0
                 .unwrap(),
             Args {
                 window_size: WindowSize::Dimensions {
@@ -843,18 +703,15 @@ mod tests {
             }
         };
 
-        let args = arg.parse(
-            &[
-                "--foo",
-                "hello",
-                "--bar",
-                "12345",
-                "--baz-right",
-                "--qux",
-                "42",
-            ],
-            Default::default(),
-        ).0
+        let args = arg.parse(&[
+            "--foo",
+            "hello",
+            "--bar",
+            "12345",
+            "--baz-right",
+            "--qux",
+            "42",
+        ]).0
             .unwrap();
 
         assert_eq!(
@@ -876,25 +733,17 @@ mod tests {
             opt_required("b", "bar", "", ""),
             baz,
             opt("q", "qux", "", ""),
-        }.map(|(foo, bar, baz, qux)| Args {
-            foo,
-            bar,
-            baz,
-            qux,
-        });
+        }.map(|(foo, bar, baz, qux)| Args { foo, bar, baz, qux });
 
-        let args = arg.parse(
-            &[
-                "--foo",
-                "hello",
-                "--bar",
-                "12345",
-                "--baz-right",
-                "--qux",
-                "42",
-            ],
-            Default::default(),
-        ).0
+        let args = arg.parse(&[
+            "--foo",
+            "hello",
+            "--bar",
+            "12345",
+            "--baz-right",
+            "--qux",
+            "42",
+        ]).0
             .unwrap();
 
         assert_eq!(
