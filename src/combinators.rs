@@ -1,3 +1,4 @@
+use std::iter;
 use super::*;
 
 pub struct Map<A, F> {
@@ -612,3 +613,106 @@ impl<T: Clone> Value<T> {
 }
 
 pub type UnitOption<T> = SomeIf<T, ()>;
+
+pub struct IterCombinator<A> {
+    pub(crate) arg: A,
+}
+
+impl<I, A> Arg for IterCombinator<A>
+where
+    I: IntoIterator,
+    A: Arg<Item = I>,
+{
+    type Item = I::IntoIter;
+    type Error = A::Error;
+    fn update_options(&self, opts: &mut getopts::Options) {
+        self.arg.update_options(opts)
+    }
+    fn name(&self) -> String {
+        self.arg.name()
+    }
+    fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
+        Ok(self.arg.get(matches)?.into_iter())
+    }
+}
+
+pub struct IterConvert<'a, A, F: 'a, U, E>
+where
+    A: Arg,
+    A::Item: Iterator,
+    F: Fn(<A::Item as Iterator>::Item) -> Result<U, E>,
+{
+    pub(crate) arg: A,
+    pub(crate) f: &'a F,
+}
+
+impl<'a, I, A, F, U, E> Arg for IterConvert<'a, A, F, U, E>
+where
+    I: Iterator,
+    A: Arg<Item = I>,
+    F: Fn(I::Item) -> Result<U, E>,
+{
+    type Item = iter::Map<I, &'a F>;
+    type Error = A::Error;
+    fn update_options(&self, opts: &mut getopts::Options) {
+        self.arg.update_options(opts)
+    }
+    fn name(&self) -> String {
+        self.arg.name()
+    }
+    fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
+        Ok(self.arg.get(matches)?.map(self.f))
+    }
+}
+
+pub struct IterOkVec<A> {
+    pub(crate) arg: A,
+}
+
+#[derive(Debug)]
+pub enum IterOkVecError<O, E> {
+    Other(O),
+    ErrorInIter { name: String, error: E },
+}
+
+impl<O: Display, E: Display> Display for IterOkVecError<O, E> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            IterOkVecError::Other(e) => fmt::Display::fmt(&e, f),
+            IterOkVecError::ErrorInIter { name, error } => {
+                write!(f, "{}: {}", name, error)
+            }
+        }
+    }
+}
+
+impl<I, A, T, E> Arg for IterOkVec<A>
+where
+    E: Debug + Display,
+    I: Iterator<Item = Result<T, E>>,
+    A: Arg<Item = I>,
+{
+    type Item = Vec<T>;
+    type Error = IterOkVecError<A::Error, E>;
+    fn update_options(&self, opts: &mut getopts::Options) {
+        self.arg.update_options(opts)
+    }
+    fn name(&self) -> String {
+        self.arg.name()
+    }
+    fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
+        let mut vec = Vec::new();
+        for x in self.arg.get(matches).map_err(IterOkVecError::Other)? {
+            match x {
+                Ok(o) => vec.push(o),
+                Err(error) => {
+                    return Err(IterOkVecError::ErrorInIter {
+                        name: self.name(),
+                        error,
+                    })
+                }
+            }
+        }
+        Ok(vec)
+    }
+}

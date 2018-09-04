@@ -58,10 +58,7 @@ impl UsageWithProgramName {
         let brief = format!("Usage: {} [options]", &self.program_name);
         self.usage.render(&brief)
     }
-    pub fn render_with_brief<F: Fn(&str) -> String>(
-        &self,
-        brief_given_program_name: F,
-    ) -> String {
+    pub fn render_with_brief<F: Fn(&str) -> String>(&self, brief_given_program_name: F) -> String {
         self.usage
             .render(brief_given_program_name(self.program_name.as_str()).as_str())
     }
@@ -73,12 +70,12 @@ pub trait Arg {
     fn update_options(&self, opts: &mut getopts::Options);
     fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error>;
     fn name(&self) -> String;
-    fn parse<C: IntoIterator>(
+    fn parse<I: IntoIterator>(
         &self,
-        args: C,
+        args: I,
     ) -> (Result<Self::Item, TopLevelError<Self::Error>>, Usage)
     where
-        C::Item: AsRef<OsStr>,
+        I::Item: AsRef<OsStr>,
     {
         let mut opts = getopts::Options::new();
         self.update_options(&mut opts);
@@ -88,6 +85,12 @@ pub trait Arg {
                 .and_then(|matches| self.get(&matches).map_err(TopLevelError::Other)),
             Usage { opts },
         )
+    }
+    fn just_parse<I: IntoIterator>(&self, args: I) -> Result<Self::Item, TopLevelError<Self::Error>>
+    where
+        I::Item: AsRef<OsStr>,
+    {
+        self.parse(args).0
     }
     fn parse_env(
         &self,
@@ -176,18 +179,31 @@ pub trait Arg {
 
 #[derive(Default)]
 pub struct Opt {
-    pub short: String,
-    pub long: String,
-    pub hint: String,
-    pub doc: String,
+    short: String,
+    long: String,
+    hint: String,
+    doc: String,
 }
 
 #[derive(Default)]
 pub struct Flag {
-    pub short: String,
-    pub long: String,
-    pub doc: String,
+    short: String,
+    long: String,
+    doc: String,
 }
+
+#[derive(Default)]
+pub struct MultiOpt {
+    opt: Opt,
+}
+
+#[derive(Default)]
+pub struct MultiFlag {
+    flag: Flag,
+}
+
+#[derive(Default)]
+pub struct FreeArgs;
 
 impl Flag {
     pub fn default_help() -> Self {
@@ -267,6 +283,55 @@ impl Arg for Flag {
     }
 }
 
+impl Arg for MultiOpt {
+    type Item = Vec<String>;
+    type Error = Never;
+    fn update_options(&self, opts: &mut getopts::Options) {
+        opts.optmulti(
+            self.opt.short.as_str(),
+            self.opt.long.as_str(),
+            self.opt.doc.as_str(),
+            self.opt.hint.as_str(),
+        );
+    }
+    fn name(&self) -> String {
+        self.opt.long.clone()
+    }
+    fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
+        Ok(matches.opt_strs(self.opt.long.as_str()))
+    }
+}
+
+impl Arg for FreeArgs {
+    type Item = Vec<String>;
+    type Error = Never;
+    fn update_options(&self, _opts: &mut getopts::Options) {}
+    fn name(&self) -> String {
+        "ARGS".to_string()
+    }
+    fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
+        Ok(matches.free.clone())
+    }
+}
+
+impl Arg for MultiFlag {
+    type Item = usize;
+    type Error = Never;
+    fn update_options(&self, opts: &mut getopts::Options) {
+        opts.optflagmulti(
+            self.flag.short.as_str(),
+            self.flag.long.as_str(),
+            self.flag.doc.as_str(),
+        );
+    }
+    fn name(&self) -> String {
+        self.flag.long.clone()
+    }
+    fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
+        Ok(matches.opt_count(self.flag.long.as_str()))
+    }
+}
+
 pub trait ArgOption: Arg {
     type OptionItem;
 
@@ -311,10 +376,7 @@ pub trait ArgOption: Arg {
         EitherHomogeneous { a: self, b }
     }
 
-    fn with_default(
-        self,
-        default: Self::OptionItem,
-    ) -> WithDefault<Self, Self::OptionItem>
+    fn with_default(self, default: Self::OptionItem) -> WithDefault<Self, Self::OptionItem>
     where
         Self: Sized,
     {
@@ -381,6 +443,92 @@ where
 {
 }
 
+pub trait ArgIntoIterator: Arg {
+    type IntoIterItem;
+    type IntoIterIter: Iterator<Item = Self::IntoIterItem>;
+
+    fn iter(self) -> IterCombinator<Self>
+    where
+        Self: Sized,
+    {
+        IterCombinator { arg: self }
+    }
+    fn into_iter_convert_ok_vec<F, U, E>(
+        self,
+        f: &F,
+    ) -> IterOkVec<IterConvert<IterCombinator<Self>, F, U, E>>
+    where
+        E: Debug + Display,
+        F: Fn(Self::IntoIterItem) -> Result<U, E>,
+        Self: Sized,
+        Self::Item: IntoIterator<Item = Self::IntoIterItem, IntoIter = Self::IntoIterIter>,
+    {
+        self.iter().iter_convert_ok_vec(f)
+    }
+}
+
+impl<I, P: ?Sized> ArgIntoIterator for P
+where
+    I: IntoIterator,
+    P: Arg<Item = I>,
+{
+    type IntoIterItem = I::Item;
+    type IntoIterIter = I::IntoIter;
+}
+
+pub trait ArgIterator: Arg {
+    type IterItem;
+
+    fn iter_convert<F, U, E>(self, f: &F) -> IterConvert<Self, F, U, E>
+    where
+        E: Debug + Display,
+        F: Fn(Self::IterItem) -> Result<U, E>,
+        Self: Sized,
+        Self::Item: Iterator<Item = Self::IterItem>,
+    {
+        IterConvert { arg: self, f }
+    }
+
+    fn iter_convert_ok_vec<F, U, E>(self, f: &F) -> IterOkVec<IterConvert<Self, F, U, E>>
+    where
+        E: Debug + Display,
+        F: Fn(Self::IterItem) -> Result<U, E>,
+        Self: Sized,
+        Self::Item: Iterator<Item = Self::IterItem>,
+    {
+        self.iter_convert(f).iter_ok_vec()
+    }
+}
+
+impl<I, P: ?Sized> ArgIterator for P
+where
+    I: Iterator,
+    P: Arg<Item = I>,
+{
+    type IterItem = I::Item;
+}
+
+pub trait ArgResultIterator: Arg {
+    type ResultValue;
+    type ResultError;
+
+    fn iter_ok_vec(self) -> IterOkVec<Self>
+    where
+        Self: Sized,
+    {
+        IterOkVec { arg: self }
+    }
+}
+
+impl<I, T, E, P: ?Sized> ArgResultIterator for P
+where
+    I: Iterator<Item = Result<T, E>>,
+    P: Arg<Item = I>,
+{
+    type ResultValue = T;
+    type ResultError = E;
+}
+
 pub fn value<T: Clone>(value: T, name: &str) -> impl Arg<Item = T, Error = Never> {
     Value::new(value, name)
 }
@@ -393,18 +541,17 @@ pub fn flag(short: &str, long: &str, doc: &str) -> impl Arg<Item = bool, Error =
     }
 }
 
-fn opt_str(
-    short: &str,
-    long: &str,
-    doc: &str,
-    hint: &str,
-) -> impl Arg<Item = Option<String>> {
+fn opt_str_internal(short: &str, long: &str, doc: &str, hint: &str) -> Opt {
     Opt {
         short: short.to_string(),
         long: long.to_string(),
         doc: doc.to_string(),
         hint: hint.to_string(),
     }
+}
+
+pub fn opt_str(short: &str, long: &str, doc: &str, hint: &str) -> impl Arg<Item = Option<String>> {
+    opt_str_internal(short, long, doc, hint)
 }
 
 pub fn opt_by<T, E, F>(
@@ -463,12 +610,7 @@ where
     ).with_default(default)
 }
 
-pub fn opt<T>(
-    short: &str,
-    long: &str,
-    doc: &str,
-    hint: &str,
-) -> impl Arg<Item = Option<T>>
+pub fn opt<T>(short: &str, long: &str, doc: &str, hint: &str) -> impl Arg<Item = Option<T>>
 where
     T: FromStr,
     <T as FromStr>::Err: Clone + Debug + Display,
@@ -476,12 +618,7 @@ where
     opt_by(short, long, doc, hint, |s| s.parse())
 }
 
-pub fn opt_required<T>(
-    short: &str,
-    long: &str,
-    doc: &str,
-    hint: &str,
-) -> impl Arg<Item = T>
+pub fn opt_required<T>(short: &str, long: &str, doc: &str, hint: &str) -> impl Arg<Item = T>
 where
     T: FromStr,
     <T as FromStr>::Err: Clone + Debug + Display,
@@ -506,6 +643,33 @@ where
         format!("{} (default: {})", doc, default).as_str(),
         hint,
     ).with_default(default)
+}
+
+pub fn multi_opt_str(
+    short: &str,
+    long: &str,
+    doc: &str,
+    hint: &str,
+) -> impl Arg<Item = impl IntoIterator<Item = String>> {
+    MultiOpt {
+        opt: opt_str_internal(short, long, doc, hint),
+    }
+}
+
+pub fn free_str() -> impl Arg<Item = Vec<String>> {
+    FreeArgs
+}
+
+fn string_parse<T: FromStr>(s: String) -> Result<T, <T as FromStr>::Err> {
+    s.parse()
+}
+
+pub fn free<T>() -> impl Arg<Item = Vec<T>>
+where
+    T: Clone + FromStr + Display,
+    <T as FromStr>::Err: Clone + Debug + Display,
+{
+    free_str().into_iter_convert_ok_vec(&string_parse)
 }
 
 #[macro_export]
@@ -578,9 +742,7 @@ mod tests {
         impl Display for WindowSize {
             fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
                 match self {
-                    WindowSize::Dimensions { width, height } => {
-                        write!(f, "{}x{}", width, height)
-                    }
+                    WindowSize::Dimensions { width, height } => write!(f, "{}x{}", width, height),
                     WindowSize::FullScreen => write!(f, "fullscreen"),
                 }
             }
@@ -596,8 +758,7 @@ mod tests {
             .option_join(opt("e", "height", "INT", "height"))
             .option_map(|(width, height)| WindowSize::Dimensions { width, height });
 
-        let fullscreen =
-            flag("f", "fullscreen", "fullscreen").some_if(WindowSize::FullScreen);
+        let fullscreen = flag("f", "fullscreen", "fullscreen").some_if(WindowSize::FullScreen);
 
         let window_size = dimensions.either_homogeneous(fullscreen).with_default(
             WindowSize::Dimensions {
@@ -612,15 +773,12 @@ mod tests {
             .join(window_size)
             .map(|(title, window_size)| Args { title, window_size });
 
-        match arg.parse(&[""]).0 {
+        match arg.just_parse(&[""]) {
             Err(e) => assert_eq!(string_fmt(&e), "title is required but not supplied"),
             Ok(o) => panic!("{:?}", o),
         }
 
-        match arg
-            .parse(&["--title", "foo", "--width", "potato"])
-            .0
-        {
+        match arg.just_parse(&["--title", "foo", "--width", "potato"]) {
             Err(e) => assert_eq!(
                 string_fmt(&e),
                 "invalid value \"potato\" supplied for \"width\" (invalid digit found in string)"
@@ -628,20 +786,15 @@ mod tests {
             Ok(o) => panic!("{:?}", o),
         }
 
-        match arg
-            .parse(
-                &[
-                    "--title",
-                    "foo",
-                    "--width",
-                    "4",
-                    "--height",
-                    "2",
-                    "--fullscreen",
-                ],
-            )
-            .0
-        {
+        match arg.just_parse(&[
+            "--title",
+            "foo",
+            "--width",
+            "4",
+            "--height",
+            "2",
+            "--fullscreen",
+        ]) {
             Err(e) => assert_eq!(
                 string_fmt(&e),
                 "(width and height) and fullscreen are mutually exclusive but both were supplied"
@@ -649,9 +802,7 @@ mod tests {
             Ok(o) => panic!("{:?}", o),
         }
 
-        match arg.parse(&["--title", "foo", "--width", "4", "--fullscreen"])
-            .0
-        {
+        match arg.just_parse(&["--title", "foo", "--width", "4", "--fullscreen"]) {
             Err(e) => assert_eq!(
                 string_fmt(&e),
                 "width and height must be supplied together or not at all \
@@ -661,7 +812,7 @@ mod tests {
         }
 
         assert_eq!(
-            arg.parse(&["--title", "foo", "--fullscreen"]).0.unwrap(),
+            arg.just_parse(&["--title", "foo", "--fullscreen"]).unwrap(),
             Args {
                 window_size: WindowSize::FullScreen,
                 title: "foo".to_string(),
@@ -669,8 +820,7 @@ mod tests {
         );
 
         assert_eq!(
-            arg.parse(&["--title", "foo", "--width", "4", "--height", "2"])
-                .0
+            arg.just_parse(&["--title", "foo", "--width", "4", "--height", "2"])
                 .unwrap(),
             Args {
                 window_size: WindowSize::Dimensions {
@@ -703,7 +853,7 @@ mod tests {
             }
         };
 
-        let args = arg.parse(&[
+        let args = arg.just_parse(&[
             "--foo",
             "hello",
             "--bar",
@@ -711,8 +861,7 @@ mod tests {
             "--baz-right",
             "--qux",
             "42",
-        ]).0
-            .unwrap();
+        ]).unwrap();
 
         assert_eq!(
             args,
@@ -735,7 +884,7 @@ mod tests {
             opt("q", "qux", "", ""),
         }.map(|(foo, bar, baz, qux)| Args { foo, bar, baz, qux });
 
-        let args = arg.parse(&[
+        let args = arg.just_parse(&[
             "--foo",
             "hello",
             "--bar",
@@ -743,8 +892,7 @@ mod tests {
             "--baz-right",
             "--qux",
             "42",
-        ]).0
-            .unwrap();
+        ]).unwrap();
 
         assert_eq!(
             args,
@@ -755,5 +903,31 @@ mod tests {
                 qux: Some(42),
             }
         );
+    }
+
+    #[test]
+    fn multi_opt() {
+        let values = multi_opt_str("", "foo", "", "")
+            .iter()
+            .map(|i| i.map(|s| format!("[{}]", s)))
+            .just_parse(&["--foo", "bar", "--foo", "baz"])
+            .unwrap()
+            .collect::<Vec<_>>();
+
+        assert_eq!(values, &["[bar]", "[baz]"]);
+
+        let values = free::<i32>().just_parse(&["1", "2"]).unwrap();
+
+        assert_eq!(values, &[1, 2]);
+
+        let error = multi_opt_str("", "foo", "", "")
+            .iter()
+            .iter_convert(&|s| s.parse::<i32>())
+            .iter_ok_vec()
+            .just_parse(&["--foo", "1", "--foo", "bar"]);
+        match error {
+            Ok(e) => panic!("{:?}", e),
+            Err(e) => assert_eq!(format!("{}", e), "foo: invalid digit found in string"),
+        }
     }
 }
