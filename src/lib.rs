@@ -4,6 +4,7 @@ use std::env;
 use std::ffi::OsStr;
 use std::fmt::{self, Debug, Display};
 use std::str::FromStr;
+use std::ops::Deref;
 
 pub mod combinators;
 
@@ -329,6 +330,20 @@ impl Arg for MultiFlag {
     }
     fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
         Ok(matches.opt_count(self.flag.long.as_str()))
+    }
+}
+
+impl<A: Arg, D: Deref<Target = A>> Arg for D {
+    type Item = A::Item;
+    type Error = A::Error;
+    fn update_options(&self, opts: &mut getopts::Options) {
+        self.deref().update_options(opts);
+    }
+    fn name(&self) -> String {
+        self.deref().name()
+    }
+    fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
+        self.deref().get(matches)
     }
 }
 
@@ -916,9 +931,10 @@ mod tests {
 
         assert_eq!(values, &["[bar]", "[baz]"]);
 
-        let values = free::<i32>().just_parse(&["1", "2"]).unwrap();
+        let f = ::std::rc::Rc::new(free::<i32>());
+        let values = f.clone().join(f.clone()).just_parse(&["1", "2"]).unwrap();
 
-        assert_eq!(values, &[1, 2]);
+        assert_eq!(values, (vec![1, 2], vec![1, 2]));
 
         let error = multi_opt_str("", "foo", "", "")
             .iter()
