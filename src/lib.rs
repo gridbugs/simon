@@ -5,6 +5,7 @@ use std::ffi::OsStr;
 use std::fmt::{self, Debug, Display};
 use std::str::FromStr;
 use std::ops::Deref;
+use std::collections::{HashMap, HashSet};
 
 pub mod combinators;
 
@@ -13,7 +14,7 @@ use combinators::*;
 // It's convenient for this to be in the top level.
 pub use combinators::HelpOr;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum TopLevelError<E> {
     Getopts(getopts::Fail),
     Other(E),
@@ -65,30 +66,197 @@ impl UsageWithProgramName {
     }
 }
 
+pub trait Options {
+    fn optopt(&mut self, short: &str, long: &str, doc: &str, hint: &str);
+    fn optflag(&mut self, short: &str, long: &str, doc: &str);
+    fn optmulti(&mut self, short: &str, long: &str, doc: &str, hint: &str);
+    fn optflagmulti(&mut self, short: &str, long: &str, doc: &str);
+}
+
+impl Options for getopts::Options {
+    fn optopt(&mut self, short: &str, long: &str, doc: &str, hint: &str) {
+        getopts::Options::optopt(self, short, long, doc, hint);
+    }
+    fn optflag(&mut self, short: &str, long: &str, doc: &str) {
+        getopts::Options::optflag(self, short, long, doc);
+    }
+    fn optmulti(&mut self, short: &str, long: &str, doc: &str, hint: &str) {
+        getopts::Options::optmulti(self, short, long, doc, hint);
+    }
+    fn optflagmulti(&mut self, short: &str, long: &str, doc: &str) {
+        getopts::Options::optflag(self, short, long, doc);
+    }
+}
+
+mod validation {
+    use super::*;
+    #[derive(PartialEq, Eq, Hash)]
+    enum Arg {
+        Flag(Flag),
+        Opt(Opt),
+    }
+
+    #[derive(Default)]
+    struct Table {
+        table: HashMap<String, HashSet<Arg>>,
+    }
+
+    impl Table {
+        fn insert(&mut self, key: &str, arg: Arg) {
+            self.table
+                .entry(key.to_string())
+                .or_insert_with(HashSet::default)
+                .insert(arg);
+        }
+        fn multi_value_keys(&self) -> impl Iterator<Item = &str> {
+            self.table
+                .iter()
+                .filter_map(|(k, v)| if v.len() > 1 { Some(k.as_str()) } else { None })
+        }
+    }
+
+    #[derive(Default)]
+    pub struct TestOptions {
+        by_short: Table,
+        by_long: Table,
+        one_char_longs: Vec<String>,
+        multi_char_shorts: Vec<String>,
+    }
+
+    impl Options for TestOptions {
+        fn optopt(&mut self, short: &str, long: &str, doc: &str, hint: &str) {
+            self.by_short
+                .insert(short, Arg::Opt(Opt::new(short, long, doc, hint)));
+            self.by_long
+                .insert(long, Arg::Opt(Opt::new(short, long, doc, hint)));
+            self.update_invalid_names(short, long);
+        }
+        fn optflag(&mut self, short: &str, long: &str, doc: &str) {
+            self.by_short
+                .insert(short, Arg::Flag(Flag::new(short, long, doc)));
+            self.by_long
+                .insert(long, Arg::Flag(Flag::new(short, long, doc)));
+            self.update_invalid_names(short, long);
+        }
+        fn optmulti(&mut self, short: &str, long: &str, doc: &str, hint: &str) {
+            self.by_short
+                .insert(short, Arg::Opt(Opt::new(short, long, doc, hint)));
+            self.by_long
+                .insert(long, Arg::Opt(Opt::new(short, long, doc, hint)));
+            self.update_invalid_names(short, long);
+        }
+        fn optflagmulti(&mut self, short: &str, long: &str, doc: &str) {
+            self.by_short
+                .insert(short, Arg::Flag(Flag::new(short, long, doc)));
+            self.by_long
+                .insert(long, Arg::Flag(Flag::new(short, long, doc)));
+            self.update_invalid_names(short, long);
+        }
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    pub struct Invalid {
+        duplicate_arg_names: Vec<String>,
+        one_char_longs: Vec<String>,
+        multi_char_shorts: Vec<String>,
+    }
+
+    impl Display for Invalid {
+        fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+            write!(f, "{:#?}", self)
+        }
+    }
+
+    impl TestOptions {
+        fn update_invalid_names(&mut self, short: &str, long: &str) {
+            if short.len() > 1 {
+                self.multi_char_shorts.push(short.to_string());
+            }
+            if long.len() == 1 {
+                self.one_char_longs.push(long.to_string());
+            }
+        }
+        fn duplicate_arg_names(&self) -> Vec<String> {
+            let mut vec = self.by_short
+                .multi_value_keys()
+                .map(|s| format!("{}", s))
+                .collect::<Vec<_>>();
+            vec.append(&mut self.by_long
+                .multi_value_keys()
+                .map(|s| format!("{}", s))
+                .collect());
+            vec
+        }
+        fn one_char_longs(&self) -> Vec<String> {
+            self.one_char_longs.clone()
+        }
+        fn multi_char_shorts(&self) -> Vec<String> {
+            self.multi_char_shorts.clone()
+        }
+        pub fn invalid(&self) -> Option<Invalid> {
+            let duplicate_arg_names = self.duplicate_arg_names();
+            let one_char_longs = self.one_char_longs();
+            let multi_char_shorts = self.multi_char_shorts();
+            if duplicate_arg_names.is_empty() && one_char_longs.is_empty()
+                && multi_char_shorts.is_empty()
+            {
+                None
+            } else {
+                Some(Invalid {
+                    duplicate_arg_names,
+                    one_char_longs,
+                    multi_char_shorts,
+                })
+            }
+        }
+    }
+}
+
+pub use validation::Invalid;
+
+pub(crate) fn parse_ignore_validation<A, I>(
+    arg: &A,
+    args: I,
+) -> (Result<A::Item, TopLevelError<A::Error>>, Usage)
+where
+    A: Arg + ?Sized,
+    I: IntoIterator,
+    I::Item: AsRef<OsStr>,
+{
+    let mut opts = getopts::Options::new();
+    arg.update_options(&mut opts);
+    (
+        opts.parse(args)
+            .map_err(TopLevelError::Getopts)
+            .and_then(|matches| arg.get(&matches).map_err(TopLevelError::Other)),
+        Usage { opts },
+    )
+}
+
 pub trait Arg {
     type Item;
-    type Error: Debug + Display;
-    fn update_options(&self, opts: &mut getopts::Options);
+    type Error: Debug + Display + Eq;
+    fn update_options<O: Options>(&self, opts: &mut O);
     fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error>;
     fn name(&self) -> String;
-    fn parse<I: IntoIterator>(
-        &self,
-        args: I,
-    ) -> (Result<Self::Item, TopLevelError<Self::Error>>, Usage)
+    fn validate(&self) -> Option<Invalid> {
+        let mut test_options = validation::TestOptions::default();
+        self.update_options(&mut test_options);
+        test_options.invalid()
+    }
+    fn parse<I>(&self, args: I) -> (Result<Self::Item, TopLevelError<Self::Error>>, Usage)
     where
+        I: IntoIterator,
         I::Item: AsRef<OsStr>,
     {
-        let mut opts = getopts::Options::new();
-        self.update_options(&mut opts);
-        (
-            opts.parse(args)
-                .map_err(TopLevelError::Getopts)
-                .and_then(|matches| self.get(&matches).map_err(TopLevelError::Other)),
-            Usage { opts },
-        )
+        if let Some(invalid) = self.validate() {
+            panic!("Invalid command spec:\n{}", invalid);
+        }
+        parse_ignore_validation(self, args)
     }
-    fn just_parse<I: IntoIterator>(&self, args: I) -> Result<Self::Item, TopLevelError<Self::Error>>
+    fn just_parse<I>(&self, args: I) -> Result<Self::Item, TopLevelError<Self::Error>>
     where
+        I: IntoIterator,
         I::Item: AsRef<OsStr>,
     {
         self.parse(args).0
@@ -148,7 +316,7 @@ pub trait Arg {
     }
     fn convert<F, U, E>(self, f: F) -> Convert<Self, F>
     where
-        E: Debug + Display,
+        E: Debug + Display + Eq,
         F: Fn(&Self::Item) -> Result<U, E>,
         Self: Sized,
         Self::Item: Clone + Debug,
@@ -176,9 +344,15 @@ pub trait Arg {
     {
         self.with_help(Flag::default_help())
     }
+    fn valid(self) -> Valid<Self>
+    where
+        Self: Sized,
+    {
+        Valid { arg: self }
+    }
 }
 
-#[derive(Default)]
+#[derive(Default, PartialEq, Eq, Hash)]
 pub struct Opt {
     short: String,
     long: String,
@@ -186,27 +360,45 @@ pub struct Opt {
     doc: String,
 }
 
-#[derive(Default)]
+#[derive(Default, PartialEq, Eq, Hash)]
 pub struct Flag {
     short: String,
     long: String,
     doc: String,
 }
 
-#[derive(Default)]
+#[derive(Default, PartialEq, Eq)]
 pub struct MultiOpt {
     opt: Opt,
 }
 
-#[derive(Default)]
+#[derive(Default, PartialEq, Eq)]
 pub struct MultiFlag {
     flag: Flag,
 }
 
-#[derive(Default)]
+#[derive(Default, PartialEq, Eq)]
 pub struct FreeArgs;
 
+impl Opt {
+    fn new(short: &str, long: &str, doc: &str, hint: &str) -> Self {
+        Self {
+            short: short.to_string(),
+            long: long.to_string(),
+            doc: doc.to_string(),
+            hint: hint.to_string(),
+        }
+    }
+}
+
 impl Flag {
+    fn new(short: &str, long: &str, doc: &str) -> Self {
+        Self {
+            short: short.to_string(),
+            long: long.to_string(),
+            doc: doc.to_string(),
+        }
+    }
     pub fn default_help() -> Self {
         Self {
             short: "h".to_string(),
@@ -216,7 +408,7 @@ impl Flag {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Never {}
 
 impl Display for Never {
@@ -236,7 +428,7 @@ impl Never {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Either<A, B> {
     Left(A),
     Right(B),
@@ -254,7 +446,7 @@ impl<A: Display, B: Display> Display for Either<A, B> {
 impl Arg for Opt {
     type Item = Option<String>;
     type Error = Never;
-    fn update_options(&self, opts: &mut getopts::Options) {
+    fn update_options<O: Options>(&self, opts: &mut O) {
         opts.optopt(
             self.short.as_str(),
             self.long.as_str(),
@@ -273,7 +465,7 @@ impl Arg for Opt {
 impl Arg for Flag {
     type Item = bool;
     type Error = Never;
-    fn update_options(&self, opts: &mut getopts::Options) {
+    fn update_options<O: Options>(&self, opts: &mut O) {
         opts.optflag(self.short.as_str(), self.long.as_str(), self.doc.as_str());
     }
     fn name(&self) -> String {
@@ -287,7 +479,7 @@ impl Arg for Flag {
 impl Arg for MultiOpt {
     type Item = Vec<String>;
     type Error = Never;
-    fn update_options(&self, opts: &mut getopts::Options) {
+    fn update_options<O: Options>(&self, opts: &mut O) {
         opts.optmulti(
             self.opt.short.as_str(),
             self.opt.long.as_str(),
@@ -306,7 +498,7 @@ impl Arg for MultiOpt {
 impl Arg for FreeArgs {
     type Item = Vec<String>;
     type Error = Never;
-    fn update_options(&self, _opts: &mut getopts::Options) {}
+    fn update_options<O: Options>(&self, _opts: &mut O) {}
     fn name(&self) -> String {
         "ARGS".to_string()
     }
@@ -318,7 +510,7 @@ impl Arg for FreeArgs {
 impl Arg for MultiFlag {
     type Item = usize;
     type Error = Never;
-    fn update_options(&self, opts: &mut getopts::Options) {
+    fn update_options<O: Options>(&self, opts: &mut O) {
         opts.optflagmulti(
             self.flag.short.as_str(),
             self.flag.long.as_str(),
@@ -336,7 +528,7 @@ impl Arg for MultiFlag {
 impl<A: Arg, D: Deref<Target = A>> Arg for D {
     type Item = A::Item;
     type Error = A::Error;
-    fn update_options(&self, opts: &mut getopts::Options) {
+    fn update_options<O: Options>(&self, opts: &mut O) {
         self.deref().update_options(opts);
     }
     fn name(&self) -> String {
@@ -407,7 +599,7 @@ pub trait ArgOption: Arg {
 
     fn option_convert<F, U, E>(self, f: F) -> OptConvert<Self, F>
     where
-        E: Debug + Display,
+        E: Debug + Display + Eq,
         F: Fn(Self::OptionItem) -> Result<U, E>,
         Self: Sized,
         Self::OptionItem: Clone + Debug,
@@ -468,12 +660,9 @@ pub trait ArgIntoIterator: Arg {
     {
         IterCombinator { arg: self }
     }
-    fn into_iter_convert_ok_vec<F, U, E>(
-        self,
-        f: &F,
-    ) -> IterOkVec<IterConvert<IterCombinator<Self>, F, U, E>>
+    fn into_iter_convert_ok_vec<F, U, E>(self, f: &F) -> IntoIterConvertOkVec<Self, F, U, E>
     where
-        E: Debug + Display,
+        E: Debug + Display + Eq,
         F: Fn(Self::IntoIterItem) -> Result<U, E>,
         Self: Sized,
         Self::Item: IntoIterator<Item = Self::IntoIterItem, IntoIter = Self::IntoIterIter>,
@@ -496,7 +685,7 @@ pub trait ArgIterator: Arg {
 
     fn iter_convert<F, U, E>(self, f: &F) -> IterConvert<Self, F, U, E>
     where
-        E: Debug + Display,
+        E: Debug + Display + Eq,
         F: Fn(Self::IterItem) -> Result<U, E>,
         Self: Sized,
         Self::Item: Iterator<Item = Self::IterItem>,
@@ -504,9 +693,9 @@ pub trait ArgIterator: Arg {
         IterConvert { arg: self, f }
     }
 
-    fn iter_convert_ok_vec<F, U, E>(self, f: &F) -> IterOkVec<IterConvert<Self, F, U, E>>
+    fn iter_convert_ok_vec<F, U, E>(self, f: &F) -> IterConvertOkVec<Self, F, U, E>
     where
-        E: Debug + Display,
+        E: Debug + Display + Eq,
         F: Fn(Self::IterItem) -> Result<U, E>,
         Self: Sized,
         Self::Item: Iterator<Item = Self::IterItem>,
@@ -577,7 +766,7 @@ pub fn opt_by<T, E, F>(
     parse: F,
 ) -> impl Arg<Item = Option<T>>
 where
-    E: Clone + Debug + Display,
+    E: Clone + Debug + Display + Eq,
     F: Fn(String) -> Result<T, E>,
 {
     opt_str(short, long, doc, hint).option_convert(parse)
@@ -591,7 +780,7 @@ pub fn opt_required_by<T, E, F>(
     parse: F,
 ) -> impl Arg<Item = T>
 where
-    E: Clone + Debug + Display,
+    E: Clone + Debug + Display + Eq,
     F: Fn(String) -> Result<T, E>,
 {
     opt_by(
@@ -612,7 +801,7 @@ pub fn opt_default_by<T, E, F>(
     parse: F,
 ) -> impl Arg<Item = T>
 where
-    E: Clone + Debug + Display,
+    E: Clone + Debug + Display + Eq,
     T: Clone + FromStr + Display,
     F: Fn(String) -> Result<T, E>,
 {
@@ -628,7 +817,7 @@ where
 pub fn opt<T>(short: &str, long: &str, doc: &str, hint: &str) -> impl Arg<Item = Option<T>>
 where
     T: FromStr,
-    <T as FromStr>::Err: Clone + Debug + Display,
+    <T as FromStr>::Err: Clone + Debug + Display + Eq,
 {
     opt_by(short, long, doc, hint, |s| s.parse())
 }
@@ -636,7 +825,7 @@ where
 pub fn opt_required<T>(short: &str, long: &str, doc: &str, hint: &str) -> impl Arg<Item = T>
 where
     T: FromStr,
-    <T as FromStr>::Err: Clone + Debug + Display,
+    <T as FromStr>::Err: Clone + Debug + Display + Eq,
 {
     opt(short, long, format!("{} (required)", doc).as_str(), hint).required()
 }
@@ -650,7 +839,7 @@ pub fn opt_default<T>(
 ) -> impl Arg<Item = T>
 where
     T: Clone + FromStr + Display,
-    <T as FromStr>::Err: Clone + Debug + Display,
+    <T as FromStr>::Err: Clone + Debug + Display + Eq,
 {
     opt(
         short,
@@ -682,7 +871,7 @@ fn string_parse<T: FromStr>(s: String) -> Result<T, <T as FromStr>::Err> {
 pub fn free<T>() -> impl Arg<Item = Vec<T>>
 where
     T: Clone + FromStr + Display,
-    <T as FromStr>::Err: Clone + Debug + Display,
+    <T as FromStr>::Err: Clone + Debug + Display + Eq,
 {
     free_str().into_iter_convert_ok_vec(&string_parse)
 }
@@ -945,5 +1134,27 @@ mod tests {
             Ok(e) => panic!("{:?}", e),
             Err(e) => assert_eq!(format!("{}", e), "foo: invalid digit found in string"),
         }
+    }
+
+    #[test]
+    fn validation() {
+        let e = opt_str("a", "foo", "", "")
+            .option_join(opt_str("a", "bar", "", ""))
+            .valid()
+            .just_parse(&[""]);
+
+        match e {
+            Ok(o) => panic!("{:?}", o),
+            Err(TopLevelError::Other(ChildErrorOr::Error(Invalid { .. }))) => (),
+            Err(e) => panic!("{:?}", e),
+        }
+
+        let v = opt_str("a", "foo", "", "")
+            .option_join(opt_str("a", "foo", "", ""))
+            .valid()
+            .just_parse(&[""])
+            .unwrap();
+
+        assert_eq!(v, None);
     }
 }

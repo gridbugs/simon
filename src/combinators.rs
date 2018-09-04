@@ -1,6 +1,21 @@
 use std::iter;
 use super::*;
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum ChildErrorOr<C, E> {
+    Child(C),
+    Error(E),
+}
+
+impl<C: Display, E: Display> Display for ChildErrorOr<C, E> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            ChildErrorOr::Child(e) => fmt::Display::fmt(&e, f),
+            ChildErrorOr::Error(e) => fmt::Display::fmt(&e, f),
+        }
+    }
+}
+
 pub struct Map<A, F> {
     pub(crate) arg: A,
     pub(crate) f: F,
@@ -13,7 +28,7 @@ where
 {
     type Item = U;
     type Error = A::Error;
-    fn update_options(&self, opts: &mut getopts::Options) {
+    fn update_options<O: Options>(&self, opts: &mut O) {
         self.arg.update_options(opts);
     }
     fn name(&self) -> String {
@@ -40,7 +55,7 @@ where
 {
     type Item = HelpOr<V::Item>;
     type Error = V::Error;
-    fn update_options(&self, opts: &mut getopts::Options) {
+    fn update_options<O: Options>(&self, opts: &mut O) {
         self.cond.update_options(opts);
         self.value.update_options(opts);
     }
@@ -68,7 +83,7 @@ where
 {
     type Item = Either<T, V::Item>;
     type Error = Either<C::Error, V::Error>;
-    fn update_options(&self, opts: &mut getopts::Options) {
+    fn update_options<O: Options>(&self, opts: &mut O) {
         self.cond.update_options(opts);
         self.value.update_options(opts);
     }
@@ -101,7 +116,7 @@ where
 {
     type Item = Option<T>;
     type Error = A::Error;
-    fn update_options(&self, opts: &mut getopts::Options) {
+    fn update_options<O: Options>(&self, opts: &mut O) {
         self.arg.update_options(opts);
     }
     fn name(&self) -> String {
@@ -121,30 +136,15 @@ pub struct TryMap<A, F> {
     pub(crate) f: F,
 }
 
-#[derive(Debug)]
-pub enum TryMapError<E, F> {
-    Other(E),
-    MapFailed(F),
-}
-
-impl<E: Display, F: Display> Display for TryMapError<E, F> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        match self {
-            TryMapError::MapFailed(fail) => fmt::Display::fmt(&fail, f),
-            TryMapError::Other(other) => fmt::Display::fmt(&other, f),
-        }
-    }
-}
-
 impl<A, U, E, F> Arg for TryMap<A, F>
 where
     A: Arg,
-    E: Debug + Display,
+    E: Debug + Display + Eq,
     F: Fn(A::Item) -> Result<U, E>,
 {
     type Item = U;
-    type Error = TryMapError<A::Error, E>;
-    fn update_options(&self, opts: &mut getopts::Options) {
+    type Error = ChildErrorOr<A::Error, E>;
+    fn update_options<O: Options>(&self, opts: &mut O) {
         self.arg.update_options(opts);
     }
     fn name(&self) -> String {
@@ -153,8 +153,8 @@ where
     fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
         self.arg
             .get(matches)
-            .map_err(TryMapError::Other)
-            .and_then(|o| (self.f)(o).map_err(TryMapError::MapFailed))
+            .map_err(ChildErrorOr::Child)
+            .and_then(|o| (self.f)(o).map_err(ChildErrorOr::Error))
     }
 }
 
@@ -170,7 +170,7 @@ where
 {
     type Item = Option<U>;
     type Error = A::Error;
-    fn update_options(&self, opts: &mut getopts::Options) {
+    fn update_options<O: Options>(&self, opts: &mut O) {
         self.arg.update_options(opts);
     }
     fn name(&self) -> String {
@@ -189,12 +189,12 @@ pub struct OptionTryMap<A, F> {
 impl<T, A, U, E, F> Arg for OptionTryMap<A, F>
 where
     A: Arg<Item = Option<T>>,
-    E: Debug + Display,
+    E: Debug + Display + Eq,
     F: Fn(T) -> Result<U, E>,
 {
     type Item = Option<U>;
-    type Error = TryMapError<A::Error, E>;
-    fn update_options(&self, opts: &mut getopts::Options) {
+    type Error = ChildErrorOr<A::Error, E>;
+    fn update_options<O: Options>(&self, opts: &mut O) {
         self.arg.update_options(opts);
     }
     fn name(&self) -> String {
@@ -203,9 +203,9 @@ where
     fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
         self.arg
             .get(matches)
-            .map_err(TryMapError::Other)
+            .map_err(ChildErrorOr::Child)
             .and_then(|o| match o {
-                Some(t) => (self.f)(t).map(Some).map_err(TryMapError::MapFailed),
+                Some(t) => (self.f)(t).map(Some).map_err(ChildErrorOr::Error),
                 None => Ok(None),
             })
     }
@@ -225,7 +225,7 @@ where
 {
     type Item = (A::Item, B::Item);
     type Error = JoinError<A::Error, B::Error>;
-    fn update_options(&self, opts: &mut getopts::Options) {
+    fn update_options<O: Options>(&self, opts: &mut O) {
         self.a.update_options(opts);
         self.b.update_options(opts);
     }
@@ -245,7 +245,7 @@ pub struct OptionJoin<A, B> {
     pub(crate) b: B,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum OptionJoinError<A, B> {
     Left(A),
     Right(B),
@@ -280,7 +280,7 @@ where
 {
     type Item = Option<(T, U)>;
     type Error = OptionJoinError<A::Error, B::Error>;
-    fn update_options(&self, opts: &mut getopts::Options) {
+    fn update_options<O: Options>(&self, opts: &mut O) {
         self.a.update_options(opts);
         self.b.update_options(opts);
     }
@@ -310,7 +310,7 @@ pub struct EitherCombinator<A, B> {
     pub(crate) b: B,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum EitherError<A, B> {
     Left(A),
     Right(B),
@@ -337,7 +337,7 @@ impl<A: Display, B: Display> Display for EitherError<A, B> {
     }
 }
 
-fn either_update_options(a: &impl Arg, b: &impl Arg, opts: &mut getopts::Options) {
+fn either_update_options(a: &impl Arg, b: &impl Arg, opts: &mut impl Options) {
     a.update_options(opts);
     b.update_options(opts);
 }
@@ -349,7 +349,7 @@ where
 {
     type Item = Option<Either<T, U>>;
     type Error = EitherError<A::Error, B::Error>;
-    fn update_options(&self, opts: &mut getopts::Options) {
+    fn update_options<O: Options>(&self, opts: &mut O) {
         either_update_options(&self.a, &self.b, opts);
     }
     fn name(&self) -> String {
@@ -382,7 +382,7 @@ where
 {
     type Item = Option<T>;
     type Error = EitherError<A::Error, B::Error>;
-    fn update_options(&self, opts: &mut getopts::Options) {
+    fn update_options<O: Options>(&self, opts: &mut O) {
         either_update_options(&self.a, &self.b, opts);
     }
     fn name(&self) -> String {
@@ -415,7 +415,7 @@ where
 {
     type Item = T;
     type Error = P::Error;
-    fn update_options(&self, opts: &mut getopts::Options) {
+    fn update_options<O: Options>(&self, opts: &mut O) {
         self.arg.update_options(opts);
     }
     fn name(&self) -> String {
@@ -432,7 +432,7 @@ pub struct Required<P> {
     pub(crate) arg: P,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum RequiredError<E> {
     Other(E),
     MissingRequiredArg { name: String },
@@ -455,7 +455,7 @@ where
 {
     type Item = T;
     type Error = RequiredError<P::Error>;
-    fn update_options(&self, opts: &mut getopts::Options) {
+    fn update_options<O: Options>(&self, opts: &mut O) {
         self.arg.update_options(opts);
     }
     fn name(&self) -> String {
@@ -475,7 +475,7 @@ pub struct Convert<A, F> {
     pub(crate) f: F,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ConvertError<O, T, E> {
     Other(O),
     ConversionFailed { name: String, error: E, value: T },
@@ -497,13 +497,13 @@ impl<O: Display, T: Display, E: Display> Display for ConvertError<O, T, E> {
 impl<A, F, U, E> Arg for Convert<A, F>
 where
     A: Arg,
-    A::Item: Clone + Debug + Display,
-    E: Debug + Display,
+    A::Item: Clone + Debug + Display + Eq,
+    E: Debug + Display + Eq,
     F: Fn(&A::Item) -> Result<U, E>,
 {
     type Item = U;
     type Error = ConvertError<A::Error, A::Item, E>;
-    fn update_options(&self, opts: &mut getopts::Options) {
+    fn update_options<O: Options>(&self, opts: &mut O) {
         self.arg.update_options(opts);
     }
     fn name(&self) -> String {
@@ -530,14 +530,14 @@ pub struct OptConvert<A, F> {
 
 impl<T, A, U, F, E> Arg for OptConvert<A, F>
 where
-    T: Clone + Debug + Display,
-    E: Clone + Debug + Display,
+    T: Clone + Debug + Display + Eq,
+    E: Clone + Debug + Display + Eq,
     A: Arg<Item = Option<T>>,
     F: Fn(T) -> Result<U, E>,
 {
     type Item = Option<U>;
     type Error = ConvertError<A::Error, T, E>;
-    fn update_options(&self, opts: &mut getopts::Options) {
+    fn update_options<O: Options>(&self, opts: &mut O) {
         self.arg.update_options(opts);
     }
     fn name(&self) -> String {
@@ -572,7 +572,7 @@ where
     type Item = P::Item;
     type Error = P::Error;
 
-    fn update_options(&self, opts: &mut getopts::Options) {
+    fn update_options<O: Options>(&self, opts: &mut O) {
         self.arg.update_options(opts);
     }
     fn name(&self) -> String {
@@ -594,7 +594,7 @@ where
 {
     type Item = T;
     type Error = Never;
-    fn update_options(&self, _opts: &mut getopts::Options) {}
+    fn update_options<O: Options>(&self, _opts: &mut O) {}
     fn name(&self) -> String {
         self.name.clone()
     }
@@ -625,7 +625,7 @@ where
 {
     type Item = I::IntoIter;
     type Error = A::Error;
-    fn update_options(&self, opts: &mut getopts::Options) {
+    fn update_options<O: Options>(&self, opts: &mut O) {
         self.arg.update_options(opts)
     }
     fn name(&self) -> String {
@@ -654,7 +654,7 @@ where
 {
     type Item = iter::Map<I, &'a F>;
     type Error = A::Error;
-    fn update_options(&self, opts: &mut getopts::Options) {
+    fn update_options<O: Options>(&self, opts: &mut O) {
         self.arg.update_options(opts)
     }
     fn name(&self) -> String {
@@ -669,7 +669,7 @@ pub struct IterOkVec<A> {
     pub(crate) arg: A,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum IterOkVecError<O, E> {
     Other(O),
     ErrorInIter { name: String, error: E },
@@ -679,22 +679,20 @@ impl<O: Display, E: Display> Display for IterOkVecError<O, E> {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
             IterOkVecError::Other(e) => fmt::Display::fmt(&e, f),
-            IterOkVecError::ErrorInIter { name, error } => {
-                write!(f, "{}: {}", name, error)
-            }
+            IterOkVecError::ErrorInIter { name, error } => write!(f, "{}: {}", name, error),
         }
     }
 }
 
 impl<I, A, T, E> Arg for IterOkVec<A>
 where
-    E: Debug + Display,
+    E: Debug + Display + Eq,
     I: Iterator<Item = Result<T, E>>,
     A: Arg<Item = I>,
 {
     type Item = Vec<T>;
     type Error = IterOkVecError<A::Error, E>;
-    fn update_options(&self, opts: &mut getopts::Options) {
+    fn update_options<O: Options>(&self, opts: &mut O) {
         self.arg.update_options(opts)
     }
     fn name(&self) -> String {
@@ -714,5 +712,40 @@ where
             }
         }
         Ok(vec)
+    }
+}
+
+pub type IterConvertOkVec<'a, T, F, U, E> = IterOkVec<IterConvert<'a, T, F, U, E>>;
+pub type IntoIterConvertOkVec<'a, T, F, U, E> = IterConvertOkVec<'a, IterCombinator<T>, F, U, E>;
+
+pub struct Valid<A> {
+    pub(crate) arg: A,
+}
+
+impl<A> Arg for Valid<A>
+where
+    A: Arg,
+{
+    type Item = A::Item;
+    type Error = ChildErrorOr<A::Error, Invalid>;
+    fn update_options<O: Options>(&self, opts: &mut O) {
+        self.arg.update_options(opts)
+    }
+    fn name(&self) -> String {
+        self.arg.name()
+    }
+    fn get(&self, matches: &getopts::Matches) -> Result<Self::Item, Self::Error> {
+        if let Some(invalid) = self.validate() {
+            Err(ChildErrorOr::Error(invalid))
+        } else {
+            self.arg.get(matches).map_err(ChildErrorOr::Child)
+        }
+    }
+    fn parse<I>(&self, args: I) -> (Result<Self::Item, TopLevelError<Self::Error>>, Usage)
+    where
+        I: IntoIterator,
+        I::Item: AsRef<OsStr>,
+    {
+        parse_ignore_validation(self, args)
     }
 }
