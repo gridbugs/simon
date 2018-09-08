@@ -1,5 +1,6 @@
-use std::ops::Deref;
 use getopts;
+use std::fmt::{self, Debug, Display};
+use std::ops::Deref;
 use util::*;
 
 pub enum SwitchArity {
@@ -24,7 +25,7 @@ pub type Matches = getopts::Matches;
 
 pub trait Arg {
     type Item;
-    type Error;
+    type Error: Debug + Display;
     fn update_switches<S: Switches>(&self, switches: &mut S);
     fn name(&self) -> String;
     fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error>;
@@ -53,6 +54,7 @@ impl<A, F, U, E> Arg for ResultMap<A, F>
 where
     A: Arg,
     F: Fn(Result<A::Item, A::Error>) -> Result<U, E>,
+    E: Debug + Display,
 {
     type Item = U;
     type Error = E;
@@ -72,9 +74,23 @@ pub struct ResultBoth<A, B> {
     b: B,
 }
 
+#[derive(Debug)]
 pub enum BothError<A, B> {
     A(A),
     B(B),
+}
+
+impl<A, B> Display for BothError<A, B>
+where
+    A: Display,
+    B: Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            BothError::A(a) => a.fmt(f),
+            BothError::B(b) => b.fmt(f),
+        }
+    }
 }
 
 impl<A, B> Arg for ResultBoth<A, B>

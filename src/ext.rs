@@ -1,12 +1,15 @@
 use arg::*;
+use std::fmt::{self, Debug, Display};
 use std::iter::FromIterator;
 use util::*;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TryMapError<A, M> {
     Arg(A),
     Map(M),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DependError {
     pub supplied: String,
     pub missing: String,
@@ -14,14 +17,71 @@ pub struct DependError {
 
 pub type MapError<E> = TryMapError<E, Never>;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MultipleMutuallyExclusiveArgs(String, String);
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MissingRequiredArg(String);
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConvertFailed<V, E> {
     name: String,
     error: E,
     value: V,
+}
+
+impl<A, M> Display for TryMapError<A, M>
+where
+    A: Display,
+    M: Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            TryMapError::Arg(a) => a.fmt(f),
+            TryMapError::Map(m) => m.fmt(f),
+        }
+    }
+}
+
+impl Display for DependError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(
+            f,
+            "{} and {} must be supplied together or not at all ({} is supplied, {} is \
+             missing)",
+            self.supplied, self.missing, self.supplied, self.missing
+        )
+    }
+}
+
+impl Display for MultipleMutuallyExclusiveArgs {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(
+            f,
+            "{} and {} are mutually exclusive but both were supplied",
+            self.0, self.1
+        )
+    }
+}
+
+impl Display for MissingRequiredArg {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(f, "{} is required but not supplied", self.0)
+    }
+}
+
+impl<V, E> Display for ConvertFailed<V, E>
+where
+    V: Display,
+    E: Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(
+            f,
+            "invalid value \"{}\" supplied for \"{}\" ({})",
+            self.value, self.name, self.error
+        )
+    }
 }
 
 pub struct ArgExt<A> {
@@ -52,6 +112,7 @@ where
     pub fn result_map<F, U, E>(self, f: F) -> ArgExt<impl Arg<Item = U, Error = E>>
     where
         F: Fn(Result<A::Item, A::Error>) -> Result<U, E>,
+        E: Debug + Display,
     {
         ArgExt {
             arg: Arg::result_map(self.arg, f),
@@ -88,6 +149,7 @@ where
         f: F,
     ) -> ArgExt<impl Arg<Item = U, Error = TryMapError<A::Error, E>>>
     where
+        E: Debug + Display,
         F: Fn(A::Item) -> Result<U, E>,
     {
         self.result_map(move |r| {
@@ -108,8 +170,8 @@ where
         impl Arg<Item = U, Error = TryMapError<A::Error, ConvertFailed<A::Item, E>>>,
     >
     where
-        A::Item: Clone,
-        E: Clone,
+        A::Item: Clone + Debug + Display,
+        E: Clone + Debug + Display,
         F: Fn(A::Item) -> Result<U, E>,
     {
         let name = self.name();
@@ -160,6 +222,7 @@ where
         f: F,
     ) -> ArgExt<impl Arg<Item = Option<U>, Error = TryMapError<A::Error, E>>>
     where
+        E: Debug + Display,
         F: Fn(T) -> Result<U, E>,
     {
         self.try_map(move |x| match x {
@@ -228,8 +291,8 @@ where
         impl Arg<Item = Option<U>, Error = TryMapError<A::Error, ConvertFailed<T, E>>>,
     >
     where
-        T: Clone,
-        E: Clone,
+        T: Clone + Debug + Display,
+        E: Clone + Debug + Display,
         F: Fn(T) -> Result<U, E>,
     {
         let name = self.name();
@@ -268,6 +331,7 @@ where
         f: F,
     ) -> ArgExt<impl Arg<Item = Vec<U>, Error = TryMapError<A::Error, E>>>
     where
+        E: Debug + Display,
         F: Fn(I::Item) -> Result<U, E>,
     {
         self.try_map(move |i| {
@@ -294,8 +358,8 @@ where
         impl Arg<Item = Vec<U>, Error = TryMapError<A::Error, ConvertFailed<I::Item, E>>>,
     >
     where
-        I::Item: Clone,
-        E: Clone,
+        I::Item: Clone + Debug + Display,
+        E: Clone + Debug + Display,
         F: Fn(I::Item) -> Result<U, E>,
     {
         let name = self.name();
@@ -308,6 +372,7 @@ where
 
 impl<A, I, T, E> ArgExt<A>
 where
+    E: Debug + Display,
     A: Arg<Item = I>,
     I: IntoIterator<Item = Result<T, E>>,
 {
