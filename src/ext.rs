@@ -30,6 +30,12 @@ pub struct ConvertFailed<V, E> {
     value: V,
 }
 
+#[derive(Debug)]
+pub enum HelpOr<T> {
+    Help,
+    Value(T),
+}
+
 impl<A, M> Display for TryMapError<A, M>
 where
     A: Display,
@@ -86,6 +92,10 @@ where
 
 pub struct ArgExt<A> {
     arg: A,
+}
+
+pub fn ext<A: Arg>(arg: A) -> ArgExt<A> {
+    ArgExt { arg }
 }
 
 impl<A> Arg for ArgExt<A>
@@ -180,6 +190,15 @@ where
             f(value.clone()).map_err(move |error| ConvertFailed { error, name, value })
         })
     }
+    pub fn with_help(self, flag: Flag) -> ArgExt<impl Arg<Item = HelpOr<A::Item>>> {
+        ext(flag).unless(self).map(|x| match x {
+            None => HelpOr::Help,
+            Some(x) => HelpOr::Value(x),
+        })
+    }
+    pub fn with_help_default(self) -> ArgExt<impl Arg<Item = HelpOr<A::Item>>> {
+        self.with_help(Flag::new("h", "help", "print this help menu"))
+    }
 }
 
 impl<A, T> ArgExt<A>
@@ -230,7 +249,10 @@ where
             Some(x) => f(x).map(Some),
         })
     }
-    pub fn option_map<F, U>(self, f: F) -> ArgExt<impl Arg<Item = Option<U>>>
+    pub fn option_map<F, U>(
+        self,
+        f: F,
+    ) -> ArgExt<impl Arg<Item = Option<U>, Error = MapError<A::Error>>>
     where
         F: Fn(T) -> U,
     {
@@ -277,7 +299,10 @@ where
     {
         self.map(move |x| x.unwrap_or(t.clone()))
     }
-    pub fn required(self) -> ArgExt<impl Arg<Item = T>> {
+    pub fn required(
+        self,
+    ) -> ArgExt<impl Arg<Item = T, Error = TryMapError<A::Error, MissingRequiredArg>>>
+    {
         let name = self.name();
         self.try_map(move |x| match x {
             Some(x) => Ok(x),
@@ -315,6 +340,19 @@ where
     }
     pub fn unit_option(self) -> ArgExt<impl Arg<Item = Option<()>>> {
         self.map(|b| if b { Some(()) } else { None })
+    }
+    pub fn unless<U>(self, b: U) -> ArgExt<impl Arg<Item = Option<U::Item>>>
+    where
+        U: Arg,
+    {
+        self.result_both(b).result_map(|r| {
+            let (a, b) = Never::result_ok(r);
+            if a.map_err(Either::Left)? {
+                Ok(None)
+            } else {
+                b.map(Some).map_err(Either::Right)
+            }
+        })
     }
 }
 
