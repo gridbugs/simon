@@ -13,10 +13,10 @@ impl Dimensions {
     fn args() -> ArgExt<impl Arg<Item = Self>> {
         let window =
             args_all_depend! {
-                opt("", "--width", "", ""),
-                opt("", "--height", "", ""),
+                opt("", "width", "", ""),
+                opt("", "height", "", ""),
             }.option_map(|(width, height)| Dimensions::Window { width, height });
-        let fullscreen = flag("", "--fullscreen", "").some_if(Dimensions::Fullscreen);
+        let fullscreen = flag("", "fullscreen", "").some_if(Dimensions::Fullscreen);
         window.either(fullscreen).required()
     }
 }

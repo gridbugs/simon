@@ -1,6 +1,6 @@
 use std::fmt::{self, Display};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Either<L, R> {
     Left(L),
     Right(R),
@@ -33,7 +33,7 @@ pub enum EitherOrBoth<L, R> {
     Both(L, R),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Never {}
 
 impl Never {

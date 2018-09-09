@@ -1,4 +1,5 @@
 use arg::*;
+use std::ffi::OsStr;
 use std::fmt::{self, Debug, Display};
 use std::iter::FromIterator;
 use util::*;
@@ -14,8 +15,6 @@ pub struct DependError {
     pub supplied: String,
     pub missing: String,
 }
-
-pub type MapError<E> = TryMapError<E, Never>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MultipleMutuallyExclusiveArgs(String, String);
@@ -113,6 +112,134 @@ where
     fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
         self.arg.get(matches)
     }
+    fn parse<I>(&self, args: I) -> (Result<Self::Item, TopLevelError<Self::Error>>, Usage)
+    where
+        I: IntoIterator,
+        I::Item: AsRef<OsStr>,
+    {
+        self.arg.parse(args)
+    }
+}
+
+struct TryMap<A, F> {
+    a: A,
+    f: F,
+}
+impl<A, U, E, F> Arg for TryMap<A, F>
+where
+    A: Arg,
+    E: Debug + Display,
+    F: Fn(A::Item) -> Result<U, E>,
+{
+    type Item = U;
+    type Error = TryMapError<A::Error, E>;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.a.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        self.a.name()
+    }
+    fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        self.a
+            .get(matches)
+            .map_err(TryMapError::Arg)
+            .and_then(|o| (self.f)(o).map_err(TryMapError::Map))
+    }
+}
+
+struct Map<A, F> {
+    a: A,
+    f: F,
+}
+impl<A, U, F> Arg for Map<A, F>
+where
+    A: Arg,
+    F: Fn(A::Item) -> U,
+{
+    type Item = U;
+    type Error = A::Error;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.a.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        self.a.name()
+    }
+    fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        self.a.get(matches).map(&self.f)
+    }
+}
+
+struct OptionMap<A, F> {
+    a: A,
+    f: F,
+}
+impl<A, T, U, F> Arg for OptionMap<A, F>
+where
+    A: Arg<Item = Option<T>>,
+    F: Fn(T) -> U,
+{
+    type Item = Option<U>;
+    type Error = A::Error;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.a.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        self.a.name()
+    }
+    fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        self.a.get(matches).map(|v| v.map(&self.f))
+    }
+}
+
+struct VecTryMap<A, F> {
+    a: A,
+    f: F,
+}
+impl<A, I, U, E, F> Arg for VecTryMap<A, F>
+where
+    I: IntoIterator,
+    A: Arg<Item = I>,
+    E: Debug + Display,
+    F: Fn(I::Item) -> Result<U, E>,
+{
+    type Item = Vec<U>;
+    type Error = TryMapError<A::Error, E>;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.a.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        self.a.name()
+    }
+    fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        let mut vec = Vec::new();
+        for x in self.a.get(matches).map_err(TryMapError::Arg)? {
+            vec.push((self.f)(x).map_err(TryMapError::Map)?);
+        }
+        Ok(vec)
+    }
+}
+
+struct VecMap<A, F> {
+    a: A,
+    f: F,
+}
+impl<A, I, U, F> Arg for VecMap<A, F>
+where
+    I: IntoIterator,
+    A: Arg<Item = I>,
+    F: Fn(I::Item) -> U,
+{
+    type Item = Vec<U>;
+    type Error = A::Error;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.a.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        self.a.name()
+    }
+    fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        Ok(self.a.get(matches)?.into_iter().map(&self.f).collect())
+    }
 }
 
 impl<A> ArgExt<A>
@@ -162,16 +289,13 @@ where
         E: Debug + Display,
         F: Fn(A::Item) -> Result<U, E>,
     {
-        self.result_map(move |r| {
-            r.map_err(TryMapError::Arg)
-                .and_then(|x| (f)(x).map_err(TryMapError::Map))
-        })
+        ext(TryMap { a: self.arg, f })
     }
-    pub fn map<F, U>(self, f: F) -> ArgExt<impl Arg<Item = U, Error = MapError<A::Error>>>
+    pub fn map<F, U>(self, f: F) -> ArgExt<impl Arg<Item = U, Error = A::Error>>
     where
         F: Fn(A::Item) -> U,
     {
-        self.try_map(move |x| Ok((f)(x)))
+        ext(Map { a: self.arg, f })
     }
     pub fn convert<F, U, E>(
         self,
@@ -198,6 +322,15 @@ where
     }
     pub fn with_help_default(self) -> ArgExt<impl Arg<Item = HelpOr<A::Item>>> {
         self.with_help(Flag::new("h", "help", "print this help menu"))
+    }
+    pub fn rename(
+        self,
+        name: &str,
+    ) -> ArgExt<impl Arg<Item = A::Item, Error = A::Error>> {
+        ext(Rename::new(self.arg, name))
+    }
+    pub fn valid(self) -> Valid<A> {
+        Valid::new(self.arg)
     }
 }
 
@@ -252,11 +385,11 @@ where
     pub fn option_map<F, U>(
         self,
         f: F,
-    ) -> ArgExt<impl Arg<Item = Option<U>, Error = MapError<A::Error>>>
+    ) -> ArgExt<impl Arg<Item = Option<U>, Error = A::Error>>
     where
         F: Fn(T) -> U,
     {
-        self.map(move |x| x.map(&f))
+        ext(OptionMap { a: self, f })
     }
     pub fn either_or_both_any<B, U>(
         self,
@@ -372,22 +505,13 @@ where
         E: Debug + Display,
         F: Fn(I::Item) -> Result<U, E>,
     {
-        self.try_map(move |i| {
-            let mut vec = Vec::new();
-            for x in i {
-                vec.push(f(x)?);
-            }
-            Ok(vec)
-        })
+        ext(VecTryMap { a: self, f })
     }
-    pub fn vec_map<F, U>(
-        self,
-        f: F,
-    ) -> ArgExt<impl Arg<Item = Vec<U>, Error = MapError<A::Error>>>
+    pub fn vec_map<F, U>(self, f: F) -> ArgExt<impl Arg<Item = Vec<U>, Error = A::Error>>
     where
         F: Fn(I::Item) -> U,
     {
-        self.vec_try_map(move |x| Ok(f(x)))
+        ext(VecMap { a: self, f })
     }
     pub fn vec_convert<F, U, E>(
         self,

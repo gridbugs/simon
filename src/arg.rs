@@ -6,6 +6,7 @@ use std::ops::Deref;
 use util::*;
 use validation::*;
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SwitchArity {
     Flag,
     MultiFlag,
@@ -13,7 +14,7 @@ pub enum SwitchArity {
     MultiOpt { hint: String },
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SwitchCommon {
     pub short: String,
     pub long: String,
@@ -104,6 +105,11 @@ pub struct Usage {
 }
 
 impl Usage {
+    pub fn empty() -> Self {
+        Self {
+            opts: getopts::Options::new(),
+        }
+    }
     pub fn render(&self, brief: &str) -> String {
         self.opts.usage(brief)
     }
@@ -168,8 +174,9 @@ pub trait Arg {
         ResultBoth { a: self, b }
     }
     fn validate(&self) -> Option<Invalid> {
-        // TODO
-        None
+        let mut checker = Checker::default();
+        self.update_switches(&mut checker);
+        checker.invalid()
     }
     fn parse<I>(&self, args: I) -> (Result<Self::Item, TopLevelError<Self::Error>>, Usage)
     where
@@ -262,7 +269,7 @@ pub struct ResultBoth<A, B> {
     b: B,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum BothError<A, B> {
     A(A),
     B(B),
@@ -482,6 +489,18 @@ pub struct Rename<A> {
     name: String,
 }
 
+impl<A> Rename<A>
+where
+    A: Arg,
+{
+    pub fn new(arg: A, name: &str) -> Self {
+        Self {
+            arg,
+            name: name.to_string(),
+        }
+    }
+}
+
 impl<A> Arg for Rename<A>
 where
     A: Arg,
@@ -503,12 +522,39 @@ pub struct Valid<A> {
     arg: A,
 }
 
+impl<A> Valid<A>
+where
+    A: Arg,
+{
+    pub fn new(arg: A) -> Self {
+        Self { arg }
+    }
+}
+
+#[derive(PartialEq, Eq, Debug)]
+pub enum ValidError<A> {
+    Arg(A),
+    Invalid(Invalid),
+}
+
+impl<A> Display for ValidError<A>
+where
+    A: Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            ValidError::Arg(a) => a.fmt(f),
+            ValidError::Invalid(i) => fmt::Display::fmt(i, f),
+        }
+    }
+}
+
 impl<A> Arg for Valid<A>
 where
     A: Arg,
 {
     type Item = A::Item;
-    type Error = A::Error;
+    type Error = ValidError<A::Error>;
     fn update_switches<S: Switches>(&self, switches: &mut S) {
         self.arg.update_switches(switches);
     }
@@ -516,6 +562,20 @@ where
         self.arg.name()
     }
     fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
-        self.arg.get(matches)
+        self.arg.get(matches).map_err(ValidError::Arg)
+    }
+    fn parse<I>(&self, args: I) -> (Result<Self::Item, TopLevelError<Self::Error>>, Usage)
+    where
+        I: IntoIterator,
+        I::Item: AsRef<OsStr>,
+    {
+        if let Some(invalid) = self.validate() {
+            (
+                Err(TopLevelError::Other(ValidError::Invalid(invalid))),
+                Usage::empty(),
+            )
+        } else {
+            parse_ignore_validation(self, args)
+        }
     }
 }

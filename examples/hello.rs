@@ -6,9 +6,6 @@ use arg_combinators::*;
 fn main() {
     match free_str()
         .map(|v| v.get(0).cloned())
-        .option_map(|x| x)
-        .option_map(|x| x)
-        .option_map(|x| x)
         .required()
         .just_parse_env_default()
     {

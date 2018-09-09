@@ -324,4 +324,116 @@ mod tests {
             16
         );
     }
+
+    #[test]
+    fn validation() {
+        let no_args: &[&'static str] = &[];
+        let has_empty_switch = args_all! {
+            opt_str("", "", "doc", "hint"),
+            opt_str("c", "control", "", ""),
+        }.valid();
+        let duplicate_switches = args_all! {
+            opt_str("a", "aa", "", ""),
+            opt_str("b", "aa", "", ""),
+            opt_str("a", "bb", "", ""),
+            opt_str("c", "control", "", ""),
+        }.valid();
+        let invalid_switches = args_all! {
+            opt_str("aa", "", "", ""),
+            opt_str("", "a", "", ""),
+            opt_str("a", "b", "", ""),
+            opt_str("bb", "aa", "", ""),
+            opt_str("c", "control", "", ""),
+        }.valid();
+
+        match has_empty_switch.just_parse(no_args).unwrap_err() {
+            TopLevelError::Other(ValidError::Invalid(invalid)) => {
+                assert_eq!(
+                    invalid,
+                    validation::Invalid {
+                        has_empty_switch: true,
+                        ..Default::default()
+                    }
+                );
+            }
+            other => panic!("{:?}", other),
+        }
+
+        match duplicate_switches.just_parse(no_args).unwrap_err() {
+            TopLevelError::Other(ValidError::Invalid(invalid)) => {
+                assert_eq!(
+                    invalid,
+                    validation::Invalid {
+                        duplicate_shorts: vec!["a".to_string()],
+                        duplicate_longs: vec!["aa".to_string()],
+                        ..Default::default()
+                    }
+                );
+            }
+            other => panic!("{:?}", other),
+        }
+
+        match invalid_switches.just_parse(no_args).unwrap_err() {
+            TopLevelError::Other(ValidError::Invalid(invalid)) => {
+                assert_eq!(
+                    invalid,
+                    validation::Invalid {
+                        one_char_longs: vec!["a".to_string(), "b".to_string()],
+                        multi_char_shorts: vec!["aa".to_string(), "bb".to_string()],
+                        ..Default::default()
+                    }
+                );
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test]
+    fn deep_recursion() {
+        let _ = value("", Some(42))
+            .option_map(|x| x)
+            .option_map(|x| x)
+            .option_map(|x| x)
+            .option_map(|x| x)
+            .option_map(|x| x)
+            .option_map(|x| x)
+            .option_map(|x| x)
+            .option_map(|x| x)
+            .option_map(|x| x)
+            .option_map(|x| x)
+            .option_map(|x| x)
+            .option_map(|x| x)
+            .option_map(|x| x)
+            .option_map(|x| x)
+            .option_map(|x| x)
+            .option_map(|x| x)
+            .option_map(|x| x)
+            .option_map(|x| x)
+            .option_map(|x| x)
+            .option_map(|x| x)
+            .option_map(|x| x);
+
+        let _ = value("", vec![1, 2, 3])
+            .vec_map(|x| x + 1)
+            .vec_map(|x| x + 1)
+            .vec_map(|x| x + 1)
+            .vec_map(|x| x + 1)
+            .vec_map(|x| x + 1)
+            .vec_map(|x| x + 1)
+            .vec_map(|x| x + 1)
+            .vec_map(|x| x + 1)
+            .vec_map(|x| x + 1)
+            .vec_map(|x| x + 1)
+            .vec_map(|x| x + 1)
+            .vec_map(|x| x + 1)
+            .vec_map(|x| x + 1)
+            .vec_map(|x| x + 1)
+            .vec_map(|x| x + 1)
+            .vec_map(|x| x + 1)
+            .vec_map(|x| x + 1)
+            .vec_map(|x| x + 1)
+            .vec_map(|x| x + 1)
+            .vec_map(|x| x + 1)
+            .vec_map(|x| x + 1);
+    }
 }

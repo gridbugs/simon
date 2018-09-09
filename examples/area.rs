@@ -11,6 +11,6 @@ fn main() {
         .just_parse_env_default()
     {
         Ok(area) => println!("area: {:?}", area),
-        Err(_) => (),
+        Err(e) => panic!("{}", e),
     }
 }
