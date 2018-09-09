@@ -435,5 +435,50 @@ mod tests {
             .vec_map(|x| x + 1)
             .vec_map(|x| x + 1)
             .vec_map(|x| x + 1);
+
+        let _ = args_all! {
+            value("", 1),
+            value("", 1),
+            value("", 1),
+            value("", 1),
+            value("", 1),
+            value("", 1),
+            value("", 1),
+            value("", 1),
+            value("", 1),
+            value("", 1),
+            value("", 1),
+            value("", 1),
+            value("", 1),
+            value("", 1),
+            value("", 1),
+            value("", 1),
+            value("", 1),
+            value("", 1),
+            value("", 1),
+        };
+
+        let _ = args_all_depend! {
+            value("", Some(1)),
+            value("", Some(1)),
+            value("", Some(1)),
+            value("", Some(1)),
+            value("", Some(1)),
+            value("", Some(1)),
+            value("", Some(1)),
+            value("", Some(1)),
+            value("", Some(1)),
+            value("", Some(1)),
+            value("", Some(1)),
+            value("", Some(1)),
+            value("", Some(1)),
+            value("", Some(1)),
+            value("", Some(1)),
+            value("", Some(1)),
+            value("", Some(1)),
+            value("", Some(1)),
+            value("", Some(1)),
+            value("", Some(1)),
+        };
     }
 }

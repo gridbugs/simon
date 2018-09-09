@@ -11,10 +11,12 @@ pub enum TryMapError<A, M> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DependError {
+pub struct MissingCodependantArg {
     pub supplied: String,
     pub missing: String,
 }
+
+pub type DependError<A, B> = TryMapError<BothError<A, B>, MissingCodependantArg>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MultipleMutuallyExclusiveArgs(String, String);
@@ -48,7 +50,7 @@ where
     }
 }
 
-impl Display for DependError {
+impl Display for MissingCodependantArg {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         write!(
             f,
@@ -242,6 +244,74 @@ where
     }
 }
 
+struct Both<A, B> {
+    a: A,
+    b: B,
+}
+
+impl<A, B> Arg for Both<A, B>
+where
+    A: Arg,
+    B: Arg,
+{
+    type Item = (A::Item, B::Item);
+    type Error = BothError<A::Error, B::Error>;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.a.update_switches(switches);
+        self.b.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        format!("({} and {})", self.a.name(), self.b.name())
+    }
+    fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        Ok((
+            self.a.get(matches).map_err(BothError::A)?,
+            self.b.get(matches).map_err(BothError::B)?,
+        ))
+    }
+}
+
+struct Depend<A, B> {
+    a: A,
+    b: B,
+}
+
+impl<T, U, A, B> Arg for Depend<A, B>
+where
+    A: Arg<Item = Option<T>>,
+    B: Arg<Item = Option<U>>,
+{
+    type Item = Option<(T, U)>;
+    type Error = DependError<A::Error, B::Error>;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.a.update_switches(switches);
+        self.b.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        format!("({} and {})", self.a.name(), self.b.name())
+    }
+    fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        let maybe_a = self.a
+            .get(matches)
+            .map_err(|e| TryMapError::Arg(BothError::A(e)))?;
+        let maybe_b = self.b
+            .get(matches)
+            .map_err(|e| TryMapError::Arg(BothError::B(e)))?;
+        match (maybe_a, maybe_b) {
+            (Some(a), Some(b)) => Ok(Some((a, b))),
+            (None, None) => Ok(None),
+            (Some(_), None) => Err(TryMapError::Map(MissingCodependantArg {
+                supplied: self.a.name(),
+                missing: self.b.name(),
+            })),
+            (None, Some(_)) => Err(TryMapError::Map(MissingCodependantArg {
+                supplied: self.b.name(),
+                missing: self.a.name(),
+            })),
+        }
+    }
+}
+
 impl<A> ArgExt<A>
 where
     A: Arg,
@@ -276,10 +346,7 @@ where
     where
         B: Arg,
     {
-        self.result_both(b).result_map(|r| {
-            let (a, b) = Never::result_ok(r);
-            Ok((a.map_err(BothError::A)?, b.map_err(BothError::B)?))
-        })
+        ext(Both { a: self, b })
     }
     pub fn try_map<F, U, E>(
         self,
@@ -338,24 +405,14 @@ impl<A, T> ArgExt<A>
 where
     A: Arg<Item = Option<T>>,
 {
-    pub fn depend<B, U>(self, b: B) -> ArgExt<impl Arg<Item = Option<(T, U)>>>
+    pub fn depend<B, U>(
+        self,
+        b: B,
+    ) -> ArgExt<impl Arg<Item = Option<(T, U)>, Error = DependError<A::Error, B::Error>>>
     where
         B: Arg<Item = Option<U>>,
     {
-        let a_name = self.name();
-        let b_name = b.name();
-        self.both(b).try_map(move |both| match both {
-            (None, None) => Ok(None),
-            (Some(a), Some(b)) => Ok(Some((a, b))),
-            (Some(_), None) => Err(DependError {
-                supplied: a_name.clone(),
-                missing: b_name.clone(),
-            }),
-            (None, Some(_)) => Err(DependError {
-                supplied: b_name.clone(),
-                missing: a_name.clone(),
-            }),
-        })
+        ext(Depend { a: self, b })
     }
     pub fn otherwise<U>(self, b: U) -> ArgExt<impl Arg<Item = Either<T, U::Item>>>
     where
