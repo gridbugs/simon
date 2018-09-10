@@ -124,10 +124,41 @@ where
     }
 }
 
-pub struct ResultMap<A, F> {
-    arg: A,
+struct MapLike<A, F> {
+    a: A,
     f: F,
 }
+impl<A, F> MapLike<A, F>
+where
+    A: Arg,
+{
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.a.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        self.a.name()
+    }
+}
+
+struct BothLike<A, B> {
+    a: A,
+    b: B,
+}
+impl<A, B> BothLike<A, B>
+where
+    A: Arg,
+    B: Arg,
+{
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.a.update_switches(switches);
+        self.b.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        format!("({} and {})", self.a.name(), self.b.name())
+    }
+}
+
+struct ResultMap<A, F>(MapLike<A, F>);
 
 impl<A, F, U, E> Arg for ResultMap<A, F>
 where
@@ -138,20 +169,17 @@ where
     type Item = U;
     type Error = E;
     fn update_switches<S: Switches>(&self, switches: &mut S) {
-        self.arg.update_switches(switches);
+        self.0.update_switches(switches);
     }
     fn name(&self) -> String {
-        self.arg.name()
+        self.0.name()
     }
     fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
-        (self.f)(self.arg.get(matches))
+        (self.0.f)(self.0.a.get(matches))
     }
 }
 
-pub struct ResultBoth<A, B> {
-    a: A,
-    b: B,
-}
+struct ResultBoth<A, B>(BothLike<A, B>);
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum BothError<A, B> {
@@ -180,21 +208,17 @@ where
     type Item = (Result<A::Item, A::Error>, Result<B::Item, B::Error>);
     type Error = Never;
     fn update_switches<S: Switches>(&self, switches: &mut S) {
-        self.a.update_switches(switches);
-        self.b.update_switches(switches);
+        self.0.update_switches(switches);
     }
     fn name(&self) -> String {
-        format!("({} and {})", self.a.name(), self.b.name())
+        self.0.name()
     }
     fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
-        Ok((self.a.get(matches), self.b.get(matches)))
+        Ok((self.0.a.get(matches), self.0.b.get(matches)))
     }
 }
 
-struct TryMap<A, F> {
-    a: A,
-    f: F,
-}
+struct TryMap<A, F>(MapLike<A, F>);
 impl<A, U, E, F> Arg for TryMap<A, F>
 where
     A: Arg,
@@ -204,16 +228,17 @@ where
     type Item = U;
     type Error = TryMapError<A::Error, E>;
     fn update_switches<S: Switches>(&self, switches: &mut S) {
-        self.a.update_switches(switches);
+        self.0.update_switches(switches);
     }
     fn name(&self) -> String {
-        self.a.name()
+        self.0.name()
     }
     fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
-        self.a
+        self.0
+            .a
             .get(matches)
             .map_err(TryMapError::Arg)
-            .and_then(|o| (self.f)(o).map_err(TryMapError::Map))
+            .and_then(|o| (self.0.f)(o).map_err(TryMapError::Map))
     }
 }
 
@@ -258,6 +283,138 @@ where
     }
     fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
         self.a.get(matches).map(|v| v.map(&self.f))
+    }
+}
+
+struct OptionTryMap<A, F> {
+    a: A,
+    f: F,
+}
+impl<A, T, U, E, F> Arg for OptionTryMap<A, F>
+where
+    A: Arg<Item = Option<T>>,
+    F: Fn(T) -> Result<U, E>,
+    E: Debug + Display,
+{
+    type Item = Option<U>;
+    type Error = TryMapError<A::Error, E>;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.a.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        self.a.name()
+    }
+    fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        match self.a.get(matches).map_err(TryMapError::Arg)? {
+            None => Ok(None),
+            Some(x) => (self.f)(x).map_err(TryMapError::Map).map(Some),
+        }
+    }
+}
+
+struct EitherOrBothAny<A, B> {
+    a: A,
+    b: B,
+}
+impl<A, B, T, U> Arg for EitherOrBothAny<A, B>
+where
+    A: Arg<Item = Option<T>>,
+    B: Arg<Item = Option<U>>,
+{
+    type Item = Option<EitherOrBoth<T, U>>;
+    type Error = BothError<A::Error, B::Error>;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.a.update_switches(switches);
+        self.b.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        format!("({} and {})", self.a.name(), self.b.name())
+    }
+    fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        let a = self.a.get(matches).map_err(BothError::A)?;
+        let b = self.b.get(matches).map_err(BothError::B)?;
+        Ok(match (a, b) {
+            (None, None) => None,
+            (Some(l), None) => Some(EitherOrBoth::Either(Either::Left(l))),
+            (None, Some(r)) => Some(EitherOrBoth::Either(Either::Right(r))),
+            (Some(l), Some(r)) => Some(EitherOrBoth::Both(l, r)),
+        })
+    }
+}
+
+struct EitherAny<A, B> {
+    a: A,
+    b: B,
+}
+impl<A, B, T, U> Arg for EitherAny<A, B>
+where
+    A: Arg<Item = Option<T>>,
+    B: Arg<Item = Option<U>>,
+{
+    type Item = Option<Either<T, U>>;
+    type Error =
+        TryMapError<BothError<A::Error, B::Error>, MultipleMutuallyExclusiveArgs>;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.a.update_switches(switches);
+        self.b.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        format!("({} and {})", self.a.name(), self.b.name())
+    }
+    fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        let a = self.a
+            .get(matches)
+            .map_err(|e| TryMapError::Arg(BothError::A(e)))?;
+        let b = self.b
+            .get(matches)
+            .map_err(|e| TryMapError::Arg(BothError::B(e)))?;
+        match (a, b) {
+            (None, None) => Ok(None),
+            (Some(l), None) => Ok(Some(Either::Left(l))),
+            (None, Some(r)) => Ok(Some(Either::Right(r))),
+            (Some(_), Some(_)) => Err(TryMapError::Map(MultipleMutuallyExclusiveArgs(
+                self.a.name(),
+                self.b.name(),
+            ))),
+        }
+    }
+}
+
+struct EitherC<A, B> {
+    a: A,
+    b: B,
+}
+impl<A, B, T> Arg for EitherC<A, B>
+where
+    A: Arg<Item = Option<T>>,
+    B: Arg<Item = Option<T>>,
+{
+    type Item = Option<T>;
+    type Error =
+        TryMapError<BothError<A::Error, B::Error>, MultipleMutuallyExclusiveArgs>;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.a.update_switches(switches);
+        self.b.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        format!("({} and {})", self.a.name(), self.b.name())
+    }
+    fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        let a = self.a
+            .get(matches)
+            .map_err(|e| TryMapError::Arg(BothError::A(e)))?;
+        let b = self.b
+            .get(matches)
+            .map_err(|e| TryMapError::Arg(BothError::B(e)))?;
+        match (a, b) {
+            (None, None) => Ok(None),
+            (Some(l), None) => Ok(Some(l)),
+            (None, Some(r)) => Ok(Some(r)),
+            (Some(_), Some(_)) => Err(TryMapError::Map(MultipleMutuallyExclusiveArgs(
+                self.a.name(),
+                self.b.name(),
+            ))),
+        }
     }
 }
 
@@ -380,21 +537,9 @@ where
     }
 }
 
-pub struct Rename<A> {
+struct Rename<A> {
     arg: A,
     name: String,
-}
-
-impl<A> Rename<A>
-where
-    A: Arg,
-{
-    pub fn new(arg: A, name: &str) -> Self {
-        Self {
-            arg,
-            name: name.to_string(),
-        }
-    }
 }
 
 impl<A> Arg for Rename<A>
@@ -416,15 +561,6 @@ where
 
 pub struct Valid<A> {
     arg: A,
-}
-
-impl<A> Valid<A>
-where
-    A: Arg,
-{
-    pub fn new(arg: A) -> Self {
-        Self { arg }
-    }
 }
 
 #[derive(PartialEq, Eq, Debug)]
@@ -485,7 +621,7 @@ where
         E: Debug + Display,
         F: Fn(Result<A::Item, A::Error>) -> Result<U, E>,
     {
-        ext(ResultMap { arg: self.arg, f })
+        ext(ResultMap(MapLike { a: self.arg, f }))
     }
     pub fn result_both<B>(
         self,
@@ -497,7 +633,7 @@ where
         B: Arg,
         Self: Sized,
     {
-        ext(ResultBoth { a: self, b })
+        ext(ResultBoth(BothLike { a: self.arg, b }))
     }
 
     pub fn both<B>(
@@ -507,7 +643,7 @@ where
     where
         B: Arg,
     {
-        ext(Both { a: self, b })
+        ext(Both { a: self.arg, b })
     }
     pub fn try_map<F, U, E>(
         self,
@@ -517,7 +653,7 @@ where
         E: Debug + Display,
         F: Fn(A::Item) -> Result<U, E>,
     {
-        ext(TryMap { a: self.arg, f })
+        ext(TryMap(MapLike { a: self.arg, f }))
     }
     pub fn map<F, U>(self, f: F) -> ArgExt<impl Arg<Item = U, Error = A::Error>>
     where
@@ -555,10 +691,13 @@ where
         self,
         name: &str,
     ) -> ArgExt<impl Arg<Item = A::Item, Error = A::Error>> {
-        ext(Rename::new(self.arg, name))
+        ext(Rename {
+            arg: self.arg,
+            name: name.to_string(),
+        })
     }
     pub fn valid(self) -> Valid<A> {
-        Valid::new(self.arg)
+        Valid { arg: self.arg }
     }
 }
 
@@ -573,7 +712,7 @@ where
     where
         B: Arg<Item = Option<U>>,
     {
-        ext(Depend { a: self, b })
+        ext(Depend { a: self.arg, b })
     }
     pub fn otherwise<U>(self, b: U) -> ArgExt<impl Arg<Item = Either<T, U::Item>>>
     where
@@ -595,10 +734,7 @@ where
         E: Debug + Display,
         F: Fn(T) -> Result<U, E>,
     {
-        self.try_map(move |x| match x {
-            None => Ok(None),
-            Some(x) => f(x).map(Some),
-        })
+        ext(OptionTryMap { a: self.arg, f })
     }
     pub fn option_map<F, U>(
         self,
@@ -607,7 +743,7 @@ where
     where
         F: Fn(T) -> U,
     {
-        ext(OptionMap { a: self, f })
+        ext(OptionMap { a: self.arg, f })
     }
     pub fn either_or_both_any<B, U>(
         self,
@@ -616,33 +752,19 @@ where
     where
         B: Arg<Item = Option<U>>,
     {
-        self.both(b).map(move |both| match both {
-            (None, None) => None,
-            (Some(l), None) => Some(EitherOrBoth::Either(Either::Left(l))),
-            (None, Some(r)) => Some(EitherOrBoth::Either(Either::Right(r))),
-            (Some(l), Some(r)) => Some(EitherOrBoth::Both(l, r)),
-        })
+        ext(EitherOrBothAny { a: self.arg, b })
     }
     pub fn either_any<B, U>(self, b: B) -> ArgExt<impl Arg<Item = Option<Either<T, U>>>>
     where
         B: Arg<Item = Option<U>>,
     {
-        let a_name = self.name();
-        let b_name = b.name();
-        self.either_or_both_any(b)
-            .option_try_map(move |either_or_both| match either_or_both {
-                EitherOrBoth::Either(e) => Ok(e),
-                EitherOrBoth::Both(_, _) => Err(MultipleMutuallyExclusiveArgs(
-                    a_name.clone(),
-                    b_name.clone(),
-                )),
-            })
+        ext(EitherAny { a: self.arg, b })
     }
     pub fn either<B>(self, b: B) -> ArgExt<impl Arg<Item = Option<T>>>
     where
         B: Arg<Item = Option<T>>,
     {
-        self.either_any(b).option_map(Either::into)
+        ext(EitherC { a: self.arg, b })
     }
     pub fn with_default(self, t: T) -> ArgExt<impl Arg<Item = T>>
     where
@@ -723,13 +845,13 @@ where
         E: Debug + Display,
         F: Fn(I::Item) -> Result<U, E>,
     {
-        ext(VecTryMap { a: self, f })
+        ext(VecTryMap { a: self.arg, f })
     }
     pub fn vec_map<F, U>(self, f: F) -> ArgExt<impl Arg<Item = Vec<U>, Error = A::Error>>
     where
         F: Fn(I::Item) -> U,
     {
-        ext(VecMap { a: self, f })
+        ext(VecMap { a: self.arg, f })
     }
     pub fn vec_convert<F, U, E>(
         self,
