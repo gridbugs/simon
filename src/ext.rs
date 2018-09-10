@@ -3,6 +3,7 @@ use std::ffi::OsStr;
 use std::fmt::{self, Debug, Display};
 use std::iter::FromIterator;
 use util::*;
+use validation::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TryMapError<A, M> {
@@ -120,6 +121,73 @@ where
         I::Item: AsRef<OsStr>,
     {
         self.arg.parse(args)
+    }
+}
+
+pub struct ResultMap<A, F> {
+    arg: A,
+    f: F,
+}
+
+impl<A, F, U, E> Arg for ResultMap<A, F>
+where
+    A: Arg,
+    F: Fn(Result<A::Item, A::Error>) -> Result<U, E>,
+    E: Debug + Display,
+{
+    type Item = U;
+    type Error = E;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.arg.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        self.arg.name()
+    }
+    fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        (self.f)(self.arg.get(matches))
+    }
+}
+
+pub struct ResultBoth<A, B> {
+    a: A,
+    b: B,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum BothError<A, B> {
+    A(A),
+    B(B),
+}
+
+impl<A, B> Display for BothError<A, B>
+where
+    A: Display,
+    B: Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            BothError::A(a) => a.fmt(f),
+            BothError::B(b) => b.fmt(f),
+        }
+    }
+}
+
+impl<A, B> Arg for ResultBoth<A, B>
+where
+    A: Arg,
+    B: Arg,
+{
+    type Item = (Result<A::Item, A::Error>, Result<B::Item, B::Error>);
+    type Error = Never;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.a.update_switches(switches);
+        self.b.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        format!("({} and {})", self.a.name(), self.b.name())
+    }
+    fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        Ok((self.a.get(matches), self.b.get(matches)))
     }
 }
 
@@ -312,18 +380,112 @@ where
     }
 }
 
+pub struct Rename<A> {
+    arg: A,
+    name: String,
+}
+
+impl<A> Rename<A>
+where
+    A: Arg,
+{
+    pub fn new(arg: A, name: &str) -> Self {
+        Self {
+            arg,
+            name: name.to_string(),
+        }
+    }
+}
+
+impl<A> Arg for Rename<A>
+where
+    A: Arg,
+{
+    type Item = A::Item;
+    type Error = A::Error;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.arg.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+    fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        self.arg.get(matches)
+    }
+}
+
+pub struct Valid<A> {
+    arg: A,
+}
+
+impl<A> Valid<A>
+where
+    A: Arg,
+{
+    pub fn new(arg: A) -> Self {
+        Self { arg }
+    }
+}
+
+#[derive(PartialEq, Eq, Debug)]
+pub enum ValidError<A> {
+    Arg(A),
+    Invalid(Invalid),
+}
+
+impl<A> Display for ValidError<A>
+where
+    A: Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            ValidError::Arg(a) => a.fmt(f),
+            ValidError::Invalid(i) => fmt::Display::fmt(i, f),
+        }
+    }
+}
+
+impl<A> Arg for Valid<A>
+where
+    A: Arg,
+{
+    type Item = A::Item;
+    type Error = ValidError<A::Error>;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.arg.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        self.arg.name()
+    }
+    fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        self.arg.get(matches).map_err(ValidError::Arg)
+    }
+    fn parse<I>(&self, args: I) -> (Result<Self::Item, TopLevelError<Self::Error>>, Usage)
+    where
+        I: IntoIterator,
+        I::Item: AsRef<OsStr>,
+    {
+        if let Some(invalid) = self.validate() {
+            (
+                Err(TopLevelError::Other(ValidError::Invalid(invalid))),
+                Usage::empty(),
+            )
+        } else {
+            parse_ignore_validation(self, args)
+        }
+    }
+}
+
 impl<A> ArgExt<A>
 where
     A: Arg,
 {
     pub fn result_map<F, U, E>(self, f: F) -> ArgExt<impl Arg<Item = U, Error = E>>
     where
-        F: Fn(Result<A::Item, A::Error>) -> Result<U, E>,
         E: Debug + Display,
+        F: Fn(Result<A::Item, A::Error>) -> Result<U, E>,
     {
-        ArgExt {
-            arg: Arg::result_map(self.arg, f),
-        }
+        ext(ResultMap { arg: self.arg, f })
     }
     pub fn result_both<B>(
         self,
@@ -333,10 +495,9 @@ where
     >
     where
         B: Arg,
+        Self: Sized,
     {
-        ArgExt {
-            arg: Arg::result_both(self.arg, b),
-        }
+        ext(ResultBoth { a: self, b })
     }
 
     pub fn both<B>(

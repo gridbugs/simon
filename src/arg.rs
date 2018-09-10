@@ -159,20 +159,6 @@ pub trait Arg {
     fn update_switches<S: Switches>(&self, switches: &mut S);
     fn name(&self) -> String;
     fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error>;
-    fn result_map<F, U, E>(self, f: F) -> ResultMap<Self, F>
-    where
-        F: Fn(Result<Self::Item, Self::Error>) -> Result<U, E>,
-        Self: Sized,
-    {
-        ResultMap { arg: self, f }
-    }
-    fn result_both<B>(self, b: B) -> ResultBoth<Self, B>
-    where
-        B: Arg,
-        Self: Sized,
-    {
-        ResultBoth { a: self, b }
-    }
     fn validate(&self) -> Option<Invalid> {
         let mut checker = Checker::default();
         self.update_switches(&mut checker);
@@ -237,73 +223,6 @@ pub trait Arg {
 
     fn just_parse_env_default(&self) -> Result<Self::Item, TopLevelError<Self::Error>> {
         self.parse_env_default().0
-    }
-}
-
-pub struct ResultMap<A, F> {
-    arg: A,
-    f: F,
-}
-
-impl<A, F, U, E> Arg for ResultMap<A, F>
-where
-    A: Arg,
-    F: Fn(Result<A::Item, A::Error>) -> Result<U, E>,
-    E: Debug + Display,
-{
-    type Item = U;
-    type Error = E;
-    fn update_switches<S: Switches>(&self, switches: &mut S) {
-        self.arg.update_switches(switches);
-    }
-    fn name(&self) -> String {
-        self.arg.name()
-    }
-    fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
-        (self.f)(self.arg.get(matches))
-    }
-}
-
-pub struct ResultBoth<A, B> {
-    a: A,
-    b: B,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum BothError<A, B> {
-    A(A),
-    B(B),
-}
-
-impl<A, B> Display for BothError<A, B>
-where
-    A: Display,
-    B: Display,
-{
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        match self {
-            BothError::A(a) => a.fmt(f),
-            BothError::B(b) => b.fmt(f),
-        }
-    }
-}
-
-impl<A, B> Arg for ResultBoth<A, B>
-where
-    A: Arg,
-    B: Arg,
-{
-    type Item = (Result<A::Item, A::Error>, Result<B::Item, B::Error>);
-    type Error = Never;
-    fn update_switches<S: Switches>(&self, switches: &mut S) {
-        self.a.update_switches(switches);
-        self.b.update_switches(switches);
-    }
-    fn name(&self) -> String {
-        format!("({} and {})", self.a.name(), self.b.name())
-    }
-    fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
-        Ok((self.a.get(matches), self.b.get(matches)))
     }
 }
 
@@ -481,101 +400,5 @@ impl Arg for Free {
     }
     fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
         Ok(matches.free.clone())
-    }
-}
-
-pub struct Rename<A> {
-    arg: A,
-    name: String,
-}
-
-impl<A> Rename<A>
-where
-    A: Arg,
-{
-    pub fn new(arg: A, name: &str) -> Self {
-        Self {
-            arg,
-            name: name.to_string(),
-        }
-    }
-}
-
-impl<A> Arg for Rename<A>
-where
-    A: Arg,
-{
-    type Item = A::Item;
-    type Error = A::Error;
-    fn update_switches<S: Switches>(&self, switches: &mut S) {
-        self.arg.update_switches(switches);
-    }
-    fn name(&self) -> String {
-        self.name.clone()
-    }
-    fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
-        self.arg.get(matches)
-    }
-}
-
-pub struct Valid<A> {
-    arg: A,
-}
-
-impl<A> Valid<A>
-where
-    A: Arg,
-{
-    pub fn new(arg: A) -> Self {
-        Self { arg }
-    }
-}
-
-#[derive(PartialEq, Eq, Debug)]
-pub enum ValidError<A> {
-    Arg(A),
-    Invalid(Invalid),
-}
-
-impl<A> Display for ValidError<A>
-where
-    A: Display,
-{
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        match self {
-            ValidError::Arg(a) => a.fmt(f),
-            ValidError::Invalid(i) => fmt::Display::fmt(i, f),
-        }
-    }
-}
-
-impl<A> Arg for Valid<A>
-where
-    A: Arg,
-{
-    type Item = A::Item;
-    type Error = ValidError<A::Error>;
-    fn update_switches<S: Switches>(&self, switches: &mut S) {
-        self.arg.update_switches(switches);
-    }
-    fn name(&self) -> String {
-        self.arg.name()
-    }
-    fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
-        self.arg.get(matches).map_err(ValidError::Arg)
-    }
-    fn parse<I>(&self, args: I) -> (Result<Self::Item, TopLevelError<Self::Error>>, Usage)
-    where
-        I: IntoIterator,
-        I::Item: AsRef<OsStr>,
-    {
-        if let Some(invalid) = self.validate() {
-            (
-                Err(TopLevelError::Other(ValidError::Invalid(invalid))),
-                Usage::empty(),
-            )
-        } else {
-            parse_ignore_validation(self, args)
-        }
     }
 }
