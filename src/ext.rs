@@ -124,41 +124,10 @@ where
     }
 }
 
-struct MapLike<A, F> {
+struct ResultMap<A, F> {
     a: A,
     f: F,
 }
-impl<A, F> MapLike<A, F>
-where
-    A: Arg,
-{
-    fn update_switches<S: Switches>(&self, switches: &mut S) {
-        self.a.update_switches(switches);
-    }
-    fn name(&self) -> String {
-        self.a.name()
-    }
-}
-
-struct BothLike<A, B> {
-    a: A,
-    b: B,
-}
-impl<A, B> BothLike<A, B>
-where
-    A: Arg,
-    B: Arg,
-{
-    fn update_switches<S: Switches>(&self, switches: &mut S) {
-        self.a.update_switches(switches);
-        self.b.update_switches(switches);
-    }
-    fn name(&self) -> String {
-        format!("({} and {})", self.a.name(), self.b.name())
-    }
-}
-
-struct ResultMap<A, F>(MapLike<A, F>);
 
 impl<A, F, U, E> Arg for ResultMap<A, F>
 where
@@ -169,17 +138,20 @@ where
     type Item = U;
     type Error = E;
     fn update_switches<S: Switches>(&self, switches: &mut S) {
-        self.0.update_switches(switches);
+        self.a.update_switches(switches);
     }
     fn name(&self) -> String {
-        self.0.name()
+        self.a.name()
     }
     fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
-        (self.0.f)(self.0.a.get(matches))
+        (self.f)(self.a.get(matches))
     }
 }
 
-struct ResultBoth<A, B>(BothLike<A, B>);
+struct ResultBoth<A, B> {
+    a: A,
+    b: B,
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum BothError<A, B> {
@@ -208,17 +180,21 @@ where
     type Item = (Result<A::Item, A::Error>, Result<B::Item, B::Error>);
     type Error = Never;
     fn update_switches<S: Switches>(&self, switches: &mut S) {
-        self.0.update_switches(switches);
+        self.a.update_switches(switches);
+        self.b.update_switches(switches);
     }
     fn name(&self) -> String {
-        self.0.name()
+        format!("({} and {})", self.a.name(), self.b.name())
     }
     fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
-        Ok((self.0.a.get(matches), self.0.b.get(matches)))
+        Ok((self.a.get(matches), self.b.get(matches)))
     }
 }
 
-struct TryMap<A, F>(MapLike<A, F>);
+struct TryMap<A, F> {
+    a: A,
+    f: F,
+}
 impl<A, U, E, F> Arg for TryMap<A, F>
 where
     A: Arg,
@@ -228,17 +204,16 @@ where
     type Item = U;
     type Error = TryMapError<A::Error, E>;
     fn update_switches<S: Switches>(&self, switches: &mut S) {
-        self.0.update_switches(switches);
+        self.a.update_switches(switches);
     }
     fn name(&self) -> String {
-        self.0.name()
+        self.a.name()
     }
     fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
-        self.0
-            .a
+        self.a
             .get(matches)
             .map_err(TryMapError::Arg)
-            .and_then(|o| (self.0.f)(o).map_err(TryMapError::Map))
+            .and_then(|o| (self.f)(o).map_err(TryMapError::Map))
     }
 }
 
@@ -621,7 +596,7 @@ where
         E: Debug + Display,
         F: Fn(Result<A::Item, A::Error>) -> Result<U, E>,
     {
-        ext(ResultMap(MapLike { a: self.arg, f }))
+        ext(ResultMap { a: self.arg, f })
     }
     pub fn result_both<B>(
         self,
@@ -633,7 +608,7 @@ where
         B: Arg,
         Self: Sized,
     {
-        ext(ResultBoth(BothLike { a: self.arg, b }))
+        ext(ResultBoth { a: self.arg, b })
     }
 
     pub fn both<B>(
@@ -653,7 +628,7 @@ where
         E: Debug + Display,
         F: Fn(A::Item) -> Result<U, E>,
     {
-        ext(TryMap(MapLike { a: self.arg, f }))
+        ext(TryMap { a: self.arg, f })
     }
     pub fn map<F, U>(self, f: F) -> ArgExt<impl Arg<Item = U, Error = A::Error>>
     where
