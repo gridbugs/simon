@@ -676,6 +676,29 @@ where
     }
 }
 
+impl<A, B> ArgExt<A>
+where
+    A: Arg<Item = HelpOr<B>>,
+{
+    pub fn parse_env_or_exit(self, program_name: ProgramName) -> B {
+        match self.parse_env(program_name) {
+            (Ok(HelpOr::Value(args)), _usage) => args,
+            (Ok(HelpOr::Help), usage) => {
+                print!("{}", usage.render());
+                ::std::process::exit(0);
+            }
+            (Err(error), usage) => {
+                print!("{}\n\n", error);
+                print!("{}", usage.render());
+                ::std::process::exit(1);
+            }
+        }
+    }
+    pub fn parse_env_default_or_exit(self) -> B {
+        self.parse_env_or_exit(Default::default())
+    }
+}
+
 impl<A, T> ArgExt<A>
 where
     A: Arg<Item = Option<T>>,
