@@ -1,13 +1,13 @@
 [package]
-name = "arg_combinators"
-description = "Command line argument combinators"
-version = "0.6.0"
-authors = ["Stephen Sherratt <sfsherratt@gmail.com>"]
+name = "simon"
+description = "Library for declaratively specifying and parsing command line arguments"
+version = "0.1.0"
+authors = ["Stephen Sherratt <stephen@sherra.tt>"]
 license = "MIT"
 readme = "README.md"
-homepage = "https://github.com/stevebob/arg-combinators.git"
-repository = "https://github.com/stevebob/arg-combinators.git"
-documentation = "https://docs.rs/arg-combinators"
+homepage = "https://github.com/stevebob/simon.git"
+repository = "https://github.com/stevebob/simon.git"
+documentation = "https://docs.rs/simon"
 
 [dependencies]
 getopts = "0.2"

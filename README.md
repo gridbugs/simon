@@ -1,4 +1,3 @@
-# Argument Combinators
+# Simon (and Arg Functors)
 
-A library of combinators for describing command line arguments for rust
-programs.
+Library for declaratively specifying and parsing command line arguments
