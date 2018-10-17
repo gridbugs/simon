@@ -123,8 +123,12 @@ impl Duplicates {
     fn insert(&mut self, info: SwitchInfo) {
         let short = info.common.short.clone();
         let long = info.common.long.clone();
-        self.by_short.insert(&short, info.clone());
-        self.by_long.insert(&long, info);
+        if short.len() > 0 {
+            self.by_short.insert(&short, info.clone());
+        }
+        if long.len() > 0 {
+            self.by_long.insert(&long, info);
+        }
     }
 }
 

@@ -1,4 +1,5 @@
 use arg::*;
+use std::env;
 use std::ffi::OsStr;
 use std::fmt::{self, Debug, Display};
 use std::iter::FromIterator;
@@ -591,6 +592,63 @@ impl<A> ArgExt<A>
 where
     A: Arg,
 {
+    pub fn parse<I>(&self, args: I) -> (Result<A::Item, TopLevelError<A::Error>>, Usage)
+    where
+        I: IntoIterator,
+        I::Item: AsRef<OsStr>,
+    {
+        self.arg.parse(args)
+    }
+    pub fn parse_env(
+        &self,
+        program_name: ProgramName,
+    ) -> (
+        Result<A::Item, TopLevelError<A::Error>>,
+        UsageWithProgramName,
+    ) {
+        let args: Vec<String> = env::args().collect();
+        let program_name = match program_name {
+            ProgramName::Literal(program_name) => program_name.clone(),
+            ProgramName::ReadArg0 => args[0].clone(),
+        };
+
+        let (result, usage) = self.parse(&args[1..]);
+
+        let usage_with_program_name = UsageWithProgramName {
+            usage,
+            program_name,
+        };
+
+        (result, usage_with_program_name)
+    }
+    pub fn parse_env_default(
+        &self,
+    ) -> (
+        Result<A::Item, TopLevelError<A::Error>>,
+        UsageWithProgramName,
+    ) {
+        self.parse_env(Default::default())
+    }
+
+    pub fn just_parse<I>(&self, args: I) -> Result<A::Item, TopLevelError<A::Error>>
+    where
+        I: IntoIterator,
+        I::Item: AsRef<OsStr>,
+    {
+        self.parse(args).0
+    }
+
+    pub fn just_parse_env(
+        &self,
+        program_name: ProgramName,
+    ) -> Result<A::Item, TopLevelError<A::Error>> {
+        self.parse_env(program_name).0
+    }
+
+    pub fn just_parse_env_default(&self) -> Result<A::Item, TopLevelError<A::Error>> {
+        self.parse_env_default().0
+    }
+
     pub fn result_map<F, U, E>(self, f: F) -> ArgExt<impl Arg<Item = U, Error = E>>
     where
         E: Debug + Display,
@@ -654,7 +712,7 @@ where
         })
     }
     pub fn with_help(self, flag: Flag) -> ArgExt<impl Arg<Item = HelpOr<A::Item>>> {
-        ext(flag).unless(self).map(|x| match x {
+        ext(flag).unless(self.arg).map(|x| match x {
             None => HelpOr::Help,
             Some(x) => HelpOr::Value(x),
         })
@@ -671,8 +729,8 @@ where
             name: name.to_string(),
         })
     }
-    pub fn valid(self) -> Valid<A> {
-        Valid { arg: self.arg }
+    pub fn valid(self) -> ArgExt<Valid<A>> {
+        ext(Valid { arg: self.arg })
     }
 }
 

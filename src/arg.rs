@@ -1,5 +1,4 @@
 use getopts;
-use std::env;
 use std::ffi::OsStr;
 use std::fmt::{self, Debug, Display};
 use std::ops::Deref;
@@ -29,6 +28,13 @@ impl SwitchCommon {
             doc: doc.to_string(),
         }
     }
+    fn matches_key(&self) -> &str {
+        if self.short.len() != 0 {
+            self.short.as_str()
+        } else {
+            self.long.as_str()
+        }
+    }
 }
 
 pub trait Switches {
@@ -53,6 +59,7 @@ impl Switches for getopts::Options {
                 );
             }
             SwitchArity::Opt { hint } => {
+                eprintln!("{:#?}", common);
                 self.optopt(
                     common.short.as_str(),
                     common.long.as_str(),
@@ -174,56 +181,6 @@ pub trait Arg {
         }
         parse_ignore_validation(self, args)
     }
-
-    fn parse_env(
-        &self,
-        program_name: ProgramName,
-    ) -> (
-        Result<Self::Item, TopLevelError<Self::Error>>,
-        UsageWithProgramName,
-    ) {
-        let args: Vec<String> = env::args().collect();
-        let program_name = match program_name {
-            ProgramName::Literal(program_name) => program_name.clone(),
-            ProgramName::ReadArg0 => args[0].clone(),
-        };
-
-        let (result, usage) = self.parse(&args[1..]);
-
-        let usage_with_program_name = UsageWithProgramName {
-            usage,
-            program_name,
-        };
-
-        (result, usage_with_program_name)
-    }
-    fn parse_env_default(
-        &self,
-    ) -> (
-        Result<Self::Item, TopLevelError<Self::Error>>,
-        UsageWithProgramName,
-    ) {
-        self.parse_env(Default::default())
-    }
-
-    fn just_parse<I>(&self, args: I) -> Result<Self::Item, TopLevelError<Self::Error>>
-    where
-        I: IntoIterator,
-        I::Item: AsRef<OsStr>,
-    {
-        self.parse(args).0
-    }
-
-    fn just_parse_env(
-        &self,
-        program_name: ProgramName,
-    ) -> Result<Self::Item, TopLevelError<Self::Error>> {
-        self.parse_env(program_name).0
-    }
-
-    fn just_parse_env_default(&self) -> Result<Self::Item, TopLevelError<Self::Error>> {
-        self.parse_env_default().0
-    }
 }
 
 impl<A, D> Arg for D
@@ -295,7 +252,7 @@ impl Arg for Flag {
         self.common.long.clone()
     }
     fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
-        Ok(matches.opt_present(self.common.long.as_str()))
+        Ok(matches.opt_present(self.common.matches_key()))
     }
 }
 
@@ -328,7 +285,7 @@ impl Arg for Opt {
         self.common.long.clone()
     }
     fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
-        Ok(matches.opt_str(self.common.long.as_str()))
+        Ok(matches.opt_str(self.common.matches_key()))
     }
 }
 
@@ -354,7 +311,7 @@ impl Arg for MultiFlag {
         self.flag.common.long.clone()
     }
     fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
-        Ok(matches.opt_count(self.flag.common.long.as_str()))
+        Ok(matches.opt_count(self.flag.common.matches_key()))
     }
 }
 
@@ -385,7 +342,7 @@ impl Arg for MultiOpt {
         self.opt.common.long.clone()
     }
     fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
-        Ok(matches.opt_strs(self.opt.common.long.as_str()))
+        Ok(matches.opt_strs(self.opt.common.matches_key()))
     }
 }
 

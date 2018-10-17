@@ -1,6 +1,6 @@
-extern crate arg_combinators;
+extern crate simon;
 
-use arg_combinators::*;
+use simon::*;
 
 fn main() {
     match opt::<f32>("", "width", "", "")

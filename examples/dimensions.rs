@@ -1,7 +1,6 @@
-#[macro_use]
-extern crate arg_combinators;
+extern crate simon;
 
-use arg_combinators::*;
+use simon::*;
 
 #[derive(Debug, Clone)]
 enum Dimensions {

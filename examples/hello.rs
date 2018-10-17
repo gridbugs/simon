@@ -1,7 +1,6 @@
-#![type_length_limit = "2097152"]
-extern crate arg_combinators;
+extern crate simon;
 
-use arg_combinators::*;
+use simon::*;
 
 fn main() {
     match free_str()

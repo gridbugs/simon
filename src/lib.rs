@@ -1,4 +1,77 @@
-#![type_length_limit = "20097152"]
+//! # Simon (an Arg Functor)
+//!
+//! A library for declaratively specifying and parsing command-line arguments.
+//!
+//! # Toy Example
+//!
+//! ```rust
+//! extern crate simon;
+//!
+//! let (name, age): (String, u8) =
+//!     simon::opt_required("n", "name", "your name", "NAME")
+//!        .both(
+//!           simon::opt("a", "age", "your age", "NUM")
+//!              .with_default(42)
+//!        )
+//!        .just_parse(&["--name", "Stephen", "-a", "26"])
+//!        .expect("Invalid command line argument");
+//!
+//! assert_eq!(name, "Stephen");
+//! assert_eq!(age, 26);
+//! ```
+//!
+//! # Usage
+//!
+//! Typical usage is to define a type to contain your command-line arguments
+//! (typically tuple or struct where each field corresponds to an argument), and
+//! then construct, from a library of combinators, a parser which knows how to
+//! parse a value of this type from command line arguments.
+//!
+//! At the core of this library is the `Arg` trait. Implementations of `Arg`
+//! know how to parse a value of a particular type (`Arg`'s associated type
+//! `Item`) out of command line arguments. This might be as simple as taking a
+//! string value directly from the command line arguments. More complicated
+//! `Arg` implementations combine multiple simpler `Arg`s together, or
+//! manipulate their output in some way. I'll sometimes refer to implementations
+//! of `Arg` where `type Item = Foo` as "parsers yielding a value of type
+//! `Foo`".
+//!
+//! The `ArgExt` struct is a wrapper around `Arg` implementations, adding
+//! methods which can be chained to create more complex parsers.
+//!
+//! This library provides "base" parsers, which capture individual command-line
+//! arguments, and "combinators" - methods of `ArgExt` which modify or combine
+//! simpler parsers. There are also a handful of macros for ergonomics, and
+//! simplifying some common patterns.
+//!
+//! In the example above, `opt_required` and `opt` are both base parsers, while
+//! `both` and `with_default` are combinators. The `both` combinators takes a
+//! pair of parsers, and creates a parser yielding the pair containing both
+//! parsers' outputs. The `with_default` combinator takes a parser which yields
+//! an optional value, and a value, and returns a parser which yields the
+//! provided value if a value was provided, and the default value otherwise.
+//!
+//! # Argument Types
+//!
+//! This library recognises 5 types of command line argument:
+//!
+//!  - a **flag** is a named argument with no value which may appear 0 or 1 times. Base
+//!  parsers of flags yield `bool` values which are `true` when an argument
+//!  appears once, and `false` otherwise.
+//!  - a **multi_flag** is a named argument with no value which may appear an
+//!  arbitrary number of times. Base parsers of multi_flags yield `usize` values
+//!  equal to the number of times the argument was passed.
+//!  - an **opt** is a named argument with a value which may appear 0 or 1 times.
+//!  Base parsers of opts yield `Option<String>` values which are `Some(<value>)`
+//!  if the argument was passed, and `None` otherwise.
+//!  - a **multi_opt** is a named argument with a value which may appear an
+//!  arbitrary number of times. The argument name must appear before each value.
+//!  Base parsers of multi_opts yield `Vec<String>`
+//!  values, with an element for each value that was passed.
+//!  - a **free** is an unnamed argument. An arbitrary number of frees may be
+//!  passed. Base parsers of frees yield 'Vec<String>` values, with an element
+//!  for each value that was passed.
+//!
 extern crate getopts;
 
 pub mod arg;
@@ -38,7 +111,7 @@ pub fn flag(short: &str, long: &str, doc: &str) -> ArgExt<impl Arg<Item = bool>>
     ext(Flag::new(short, long, doc))
 }
 
-pub fn multiflag(short: &str, long: &str, doc: &str) -> ArgExt<impl Arg<Item = usize>> {
+pub fn multi_flag(short: &str, long: &str, doc: &str) -> ArgExt<impl Arg<Item = usize>> {
     ext(MultiFlag::new(short, long, doc))
 }
 
@@ -282,6 +355,16 @@ macro_rules! args_map {
     };
 }
 
+#[macro_export]
+macro_rules! args_either {
+    ( $only:expr ) => {
+        $only
+    };
+    ( $head:expr, $($tail:expr),* $(,)* ) => {
+        $head $( .either($tail) )*
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -386,6 +469,26 @@ mod tests {
             }
             other => panic!("{:?}", other),
         }
+    }
+
+    #[test]
+    fn either() {
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        enum E {
+            A,
+            B,
+            C(String),
+        }
+
+        let choice = args_either! {
+            flag("a", "", "").some_if(E::A),
+            flag("b", "", "").some_if(E::B),
+            opt("c", "", "", "").option_map(|s| E::C(s)),
+        }.required()
+            .just_parse(&["-c", "foo"])
+            .unwrap();
+
+        assert_eq!(choice, E::C("foo".to_string()));
     }
 
     #[test]
