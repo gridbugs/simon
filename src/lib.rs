@@ -27,24 +27,29 @@
 //! then construct, from a library of combinators, a parser which knows how to
 //! parse a value of this type from command line arguments.
 //!
-//! At the core of this library is the `Arg` trait. Implementations of `Arg`
-//! know how to parse a value of a particular type (`Arg`'s associated type
+//! At the core of this library is the [Arg] trait. Implementations of [Arg]
+//! know how to parse a value of a particular type ([Arg]'s associated type
 //! `Item`) out of command line arguments. This might be as simple as taking a
 //! string value directly from the command line arguments. More complicated
-//! `Arg` implementations combine multiple simpler `Arg`s together, or
+//! [Arg] implementations combine multiple simpler [Arg]s together, or
 //! manipulate their output in some way. I'll sometimes refer to implementations
-//! of `Arg` where `type Item = Foo` as "parsers yielding a value of type
+//! of [Arg] where `type Item = Foo` as "parsers yielding a value of type
 //! `Foo`".
 //!
-//! The `ArgExt` struct is a wrapper around `Arg` implementations, adding
+//! The `ArgExt` struct is a wrapper around [Arg] implementations, adding
 //! methods which can be chained to create more complex parsers.
 //!
-//! This library provides "base" parsers, which capture individual command-line
+//! This library provides "base" parsers, which parse individual command-line
 //! arguments, and "combinators" - methods of `ArgExt` which modify or combine
-//! simpler parsers. There are also a handful of macros for ergonomics, and
+//! simpler parsers. Base parsers for arguments which accept parameters have
+//! variants which yield values of inferred types, converted using [FromStr],
+//! and additional variants which yield values converted from strings by a
+//! provided conversion function.
+//! There are also a handful of macros for ergonomics, and
 //! simplifying some common patterns.
 //!
-//! In the example above, `opt_required` and `opt` are both base parsers, while
+//! In the example above, `opt_required` and `opt` are both parsers yielding
+//! values of inferred types (in this case [String] and [u8]), while
 //! `both` and `with_default` are combinators. The `both` combinators takes a
 //! pair of parsers, and creates a parser yielding the pair containing both
 //! parsers' outputs. The `with_default` combinator takes a parser which yields
@@ -55,13 +60,13 @@
 //!
 //! This library recognises 5 types of command line argument:
 //!
-//!  - a **flag** is a named argument with no value which may appear 0 or 1 times. Base
-//!  parsers of flags yield `bool` values which are `true` when an argument
-//!  appears once, and `false` otherwise.
-//!  - a **multi_flag** is a named argument with no value which may appear an
+//!  - a **flag** is a named argument with no parameter which may appear 0 or 1
+//!  times. Base parsers of flags yield `bool` values which are `true` when an
+//!  argument appears once, and `false` otherwise.
+//!  - a **multi_flag** is a named argument with no parameter which may appear an
 //!  arbitrary number of times. Base parsers of multi_flags yield `usize` values
 //!  equal to the number of times the argument was passed.
-//!  - an **opt** is a named argument with a value which may appear 0 or 1 times.
+//!  - an **opt** is a named argument with a parameter, which may appear 0 or 1 times.
 //!  Base parsers of opts yield `Option<String>` values which are `Some(<value>)`
 //!  if the argument was passed, and `None` otherwise.
 //!  - a **multi_opt** is a named argument with a value which may appear an
@@ -72,6 +77,66 @@
 //!  passed. Base parsers of frees yield 'Vec<String>` values, with an element
 //!  for each value that was passed.
 //!
+//! # Errors
+//!
+//! ## Parse Errors
+//!
+//! Parse errors are the result of invalid command-line arguments being passed
+//! to a program.
+//! In addition to the `Item` associated type, the [Arg] trait has an additional
+//! associated type named `Error`. Implementations of [Arg] can use this type to
+//! return errors detected during parsing. Combinators typically propagate
+//! errors of child parsers through their own `Error`s, though they are of
+//! course free to handle these errors themselves. Some example parse errors:
+//!
+//! - missing required arguments
+//! - parameters passed which can't be converted to the required type
+//! - passing multiple mutually exclusive arguments
+//!
+//! ## Spec Errors
+//!
+//! Spec errors are problems with the specification of arguments themselves.
+//! Some examples of spec errors:
+//!
+//! - specifying the same argument name multiple times
+//! - specifying a short name longer than 1 character
+//! - specifying a long name with a length of 1 character
+//! - specifying neither a short name, nor a long name
+//!
+//! Since spec errors don't depend on the specific arguments passed to a
+//! program, running a program once is usually enough to convince yourself that
+//! it is free of these errors. As such, spec errors cause panics while parsing.
+//!
+//! If however, your program's arguments are
+//! generated dynamically (such as from a config file or locale), you want a way
+//! to handle spec errors. The combinator [ArgExt::valid] creates a parser
+//! which treats spec errors as if they were parse errors - returning an error during
+//! parsing rather than panicking.
+//!
+//! # Parsing real command-line arguments
+//!
+//! The [Toy Example](#toy-example) above specified the arguments in a slice. In practice, most
+//! programs will read actual command-line arguments. Methods for running
+//! a parser on real command-line arguments are [ArgExt::parse_env] and
+//! [ArgExt::parse_env_or_exit], and their variants.
+//!
+//! # Help and Usage
+//!
+//! The combinator [ArgExt::with_help] creates a parser which accepts a help flag.
+//! The [ArgExt::with_help_default] combinator is the same, but it uses the flag
+//! "-h" and "--help".
+//!
+//! The [ArgExt::parse_env] function returns a [Usage] in addition to a parsed
+//! value or error, which can be rendered ([Usage::render]) to produce
+//! documentation on arguments, suitable for printing when help was requested,
+//! or the user have invalid input.
+//!
+//! The methods [ArgExt::parse_env_or_exit] and
+//! [ArgExt::parse_env_default_or_exit] are only available on values
+//! produced by [ArgExt::with_help] and [ArgExt::with_help_default]
+//! irrespectively. These functions run the parser on the program's command-line
+//! arguments, and print usage and exit if a parser error was detected, or help
+//! was requested, and returns the parsed value otherwise.
 extern crate getopts;
 
 pub mod arg;
