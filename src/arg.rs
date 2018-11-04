@@ -59,7 +59,6 @@ impl Switches for getopts::Options {
                 );
             }
             SwitchArity::Opt { hint } => {
-                eprintln!("{:#?}", common);
                 self.optopt(
                     common.short.as_str(),
                     common.long.as_str(),
