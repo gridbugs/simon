@@ -822,11 +822,14 @@ where
     {
         ext(EitherC { a: self.arg, b })
     }
+    pub fn with_default_lazy<F: Fn() -> T>(self, f: F) -> ArgExt<impl Arg<Item = T>> {
+        self.map(move |x| x.unwrap_or_else(&f))
+    }
     pub fn with_default(self, t: T) -> ArgExt<impl Arg<Item = T>>
     where
         T: Clone,
     {
-        self.map(move |x| x.unwrap_or(t.clone()))
+        self.with_default_lazy(move || t.clone())
     }
     pub fn required(
         self,
