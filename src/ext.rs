@@ -541,6 +541,36 @@ where
     }
 }
 
+struct Unless<C, O> {
+    condition: C,
+    otherwise: O,
+}
+
+impl<C, O> Arg for Unless<C, O>
+where
+    C: Arg<Item = bool>,
+    O: Arg,
+{
+    type Item = Option<O::Item>;
+    type Error = BothError<C::Error, O::Error>;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.condition.update_switches(switches);
+        self.otherwise.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        format!("{} unless {}", self.otherwise.name(), self.condition.name())
+    }
+    fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        let condition = self.condition.get(matches).map_err(BothError::A)?;
+        if condition {
+            Ok(None)
+        } else {
+            let otherwise = self.otherwise.get(matches).map_err(BothError::B)?;
+            Ok(Some(otherwise))
+        }
+    }
+}
+
 pub struct Valid<A> {
     arg: A,
 }
@@ -883,13 +913,9 @@ where
     where
         U: Arg,
     {
-        self.result_both(b).result_map(|r| {
-            let (a, b) = Never::result_ok(r);
-            if a.map_err(Either::Left)? {
-                Ok(None)
-            } else {
-                b.map(Some).map_err(Either::Right)
-            }
+        ext(Unless {
+            condition: self.arg,
+            otherwise: b,
         })
     }
 }
