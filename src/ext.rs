@@ -900,11 +900,17 @@ impl<A> ArgExt<A>
 where
     A: Arg<Item = bool>,
 {
+    pub fn some_if_lazy<T, F>(self, f: F) -> ArgExt<impl Arg<Item = Option<T>>>
+    where
+        F: Fn() -> T,
+    {
+        self.map(move |b| if b { Some(f()) } else { None })
+    }
     pub fn some_if<T>(self, t: T) -> ArgExt<impl Arg<Item = Option<T>>>
     where
         T: Clone,
     {
-        self.map(move |b| if b { Some(t.clone()) } else { None })
+        self.some_if_lazy(move || t.clone())
     }
     pub fn unit_option(self) -> ArgExt<impl Arg<Item = Option<()>>> {
         self.map(|b| if b { Some(()) } else { None })
