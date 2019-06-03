@@ -338,10 +338,12 @@ where
         format!("({} and {})", self.a.name(), self.b.name())
     }
     fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
-        let a = self.a
+        let a = self
+            .a
             .get(matches)
             .map_err(|e| TryMapError::Arg(BothError::A(e)))?;
-        let b = self.b
+        let b = self
+            .b
             .get(matches)
             .map_err(|e| TryMapError::Arg(BothError::B(e)))?;
         match (a, b) {
@@ -376,10 +378,12 @@ where
         format!("({} and {})", self.a.name(), self.b.name())
     }
     fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
-        let a = self.a
+        let a = self
+            .a
             .get(matches)
             .map_err(|e| TryMapError::Arg(BothError::A(e)))?;
-        let b = self.b
+        let b = self
+            .b
             .get(matches)
             .map_err(|e| TryMapError::Arg(BothError::B(e)))?;
         match (a, b) {
@@ -492,10 +496,12 @@ where
         format!("({} and {})", self.a.name(), self.b.name())
     }
     fn get(&self, matches: &Matches) -> Result<Self::Item, Self::Error> {
-        let maybe_a = self.a
+        let maybe_a = self
+            .a
             .get(matches)
             .map_err(|e| TryMapError::Arg(BothError::A(e)))?;
-        let maybe_b = self.b
+        let maybe_b = self
+            .b
             .get(matches)
             .map_err(|e| TryMapError::Arg(BothError::B(e)))?;
         match (maybe_a, maybe_b) {

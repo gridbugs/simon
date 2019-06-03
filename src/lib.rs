@@ -144,11 +144,11 @@ pub mod ext;
 pub mod util;
 pub mod validation;
 
-use arg::*;
 pub use arg::Arg;
-use ext::*;
+use arg::*;
 pub use ext::ArgExt;
 pub use ext::HelpOr;
+use ext::*;
 use std::fmt::{Debug, Display};
 use std::str::FromStr;
 
@@ -221,8 +221,9 @@ where
         long,
         format!("{} (default: {})", doc, default).as_str(),
         hint,
-    ).option_convert(f)
-        .with_default(default)
+    )
+    .option_convert(f)
+    .with_default(default)
 }
 
 pub fn opt_by_default_str<F, T, E>(
@@ -242,8 +243,9 @@ where
         long,
         format!("{} (default: {})", doc, default).as_str(),
         hint,
-    ).with_default(default.to_string())
-        .convert(f)
+    )
+    .with_default(default.to_string())
+    .convert(f)
 }
 
 pub fn opt_by_required<F, T, E>(
@@ -290,8 +292,9 @@ where
         long,
         format!("{} (default: {})", doc, default).as_str(),
         hint,
-    ).option_convert(|s| s.parse())
-        .with_default(default)
+    )
+    .option_convert(|s| s.parse())
+    .with_default(default)
 }
 
 pub fn opt_default_str<T>(
@@ -310,8 +313,9 @@ where
         long,
         format!("{} (default: {})", doc, default).as_str(),
         hint,
-    ).with_default(default.to_string())
-        .convert(|s| s.parse())
+    )
+    .with_default(default.to_string())
+    .convert(|s| s.parse())
 }
 
 pub fn opt_required<T>(
@@ -453,8 +457,9 @@ mod tests {
                 } in {
                     a + b
                 }
-            }.just_parse(&["--foo", "7", "--bar", "9"])
-                .unwrap(),
+            }
+            .just_parse(&["--foo", "7", "--bar", "9"])
+            .unwrap(),
             16
         );
     }
@@ -465,10 +470,11 @@ mod tests {
             args_all_depend! {
                 opt::<u32>("f", "foo", "", ""),
                 opt::<u32>("b", "bar", "", ""),
-            }.required()
-                .map(|(a, b)| a + b)
-                .just_parse(&["--foo", "7", "--bar", "9"])
-                .unwrap(),
+            }
+            .required()
+            .map(|(a, b)| a + b)
+            .just_parse(&["--foo", "7", "--bar", "9"])
+            .unwrap(),
             16
         );
     }
@@ -479,20 +485,23 @@ mod tests {
         let has_empty_switch = args_all! {
             opt_str("", "", "doc", "hint"),
             opt_str("c", "control", "", ""),
-        }.valid();
+        }
+        .valid();
         let duplicate_switches = args_all! {
             opt_str("a", "aa", "", ""),
             opt_str("b", "aa", "", ""),
             opt_str("a", "bb", "", ""),
             opt_str("c", "control", "", ""),
-        }.valid();
+        }
+        .valid();
         let invalid_switches = args_all! {
             opt_str("aa", "", "", ""),
             opt_str("", "a", "", ""),
             opt_str("a", "b", "", ""),
             opt_str("bb", "aa", "", ""),
             opt_str("c", "control", "", ""),
-        }.valid();
+        }
+        .valid();
 
         match has_empty_switch.just_parse(no_args).unwrap_err() {
             TopLevelError::Other(ValidError::Invalid(invalid)) => {
@@ -549,9 +558,10 @@ mod tests {
             flag("a", "", "").some_if(E::A),
             flag("b", "", "").some_if(E::B),
             opt("c", "", "", "").option_map(|s| E::C(s)),
-        }.required()
-            .just_parse(&["-c", "foo"])
-            .unwrap();
+        }
+        .required()
+        .just_parse(&["-c", "foo"])
+        .unwrap();
 
         assert_eq!(choice, E::C("foo".to_string()));
     }
