@@ -108,10 +108,14 @@ pub trait Arg: Sized {
     fn update_switches<S: Switches>(&self, switches: &mut S);
     fn name(&self) -> String;
     fn get(self, matches: &Matches) -> Result<Self::Item, Self::Error>;
-    fn validate(&self) -> Option<Invalid> {
+    fn validate(&self) -> Result<(), Invalid> {
         let mut checker = validation::Checker::default();
         self.update_switches(&mut checker);
-        checker.invalid()
+        if let Some(invalid) = checker.invalid() {
+            Err(invalid)
+        } else {
+            Ok(())
+        }
     }
     fn parse_specified_ignoring_validation<I>(
         self,
@@ -141,7 +145,7 @@ pub trait Arg: Sized {
         I: IntoIterator,
         I::Item: AsRef<OsStr>,
     {
-        if let Some(invalid) = self.validate() {
+        if let Err(invalid) = self.validate() {
             panic!("Invalid command spec:\n{}", invalid);
         }
         self.parse_specified_ignoring_validation(program_name, args)
@@ -180,7 +184,7 @@ pub trait Arg: Sized {
     }
     fn both<O>(self, other: O) -> Both<Self, O>
     where
-        O: Arg<Item = Self::Item>,
+        O: Arg,
     {
         Both { a: self, b: other }
     }
@@ -198,6 +202,15 @@ pub trait Arg: Sized {
         F: FnOnce(&str) -> Result<T, E>,
     {
         OptionConvertString { arg: self, f }
+    }
+    fn depend<O>(self, other: O) -> Depend<Self, O>
+    where
+        O: Arg,
+    {
+        Depend { a: self, b: other }
+    }
+    fn some_if<T>(self, t: T) -> SomeIf<Self, T> {
+        SomeIf { arg: self, t }
     }
 }
 
@@ -652,6 +665,101 @@ where
     }
 }
 
+pub struct Depend<A, B>
+where
+    A: Arg,
+    B: Arg,
+{
+    a: A,
+    b: B,
+}
+
+#[derive(Debug)]
+pub enum DependError<A, B> {
+    A(A),
+    B(B),
+    MissingDependency { a: String, b: String },
+}
+
+impl<A, B> fmt::Display for DependError<A, B>
+where
+    A: fmt::Display,
+    B: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            Self::A(a) => a.fmt(f),
+            Self::B(b) => b.fmt(f),
+            Self::MissingDependency { a, b } => {
+                write!(f, "({}) and ({}) must be specified together", a, b)
+            }
+        }
+    }
+}
+
+impl<T, U, A, B> Arg for Depend<A, B>
+where
+    A: Arg<Item = Option<T>>,
+    B: Arg<Item = Option<U>>,
+{
+    type Item = Option<(T, U)>;
+    type Error = DependError<A::Error, B::Error>;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.a.update_switches(switches);
+        self.b.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        format!("({} and {})", self.a.name(), self.b.name())
+    }
+    fn get(self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        let missing_dependency = DependError::MissingDependency {
+            a: self.a.name(),
+            b: self.b.name(),
+        };
+        let Self { a, b } = self;
+        if let Some(a) = a.get(matches).map_err(DependError::A)? {
+            if let Some(b) = b.get(matches).map_err(DependError::B)? {
+                Ok(Some((a, b)))
+            } else {
+                Err(missing_dependency)
+            }
+        } else if b.get(matches).map_err(DependError::B)?.is_some() {
+            Err(missing_dependency)
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+pub struct SomeIf<A, T>
+where
+    A: Arg,
+{
+    arg: A,
+    t: T,
+}
+
+impl<A, T> Arg for SomeIf<A, T>
+where
+    A: Arg<Item = bool>,
+{
+    type Item = Option<T>;
+    type Error = A::Error;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.arg.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        self.arg.name()
+    }
+    fn get(self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        if self.arg.get(matches)? {
+            Ok(Some(self.t))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
 pub fn flag(short: &str, long: &str, doc: &str) -> impl Arg<Item = bool> {
     Flag::new(short, long, doc)
 }
@@ -693,12 +801,12 @@ macro_rules! args_all {
 }
 
 #[macro_export]
-macro_rules! args_either {
+macro_rules! args_choice {
     ( $only:expr ) => {
         $only
     };
     ( $head:expr, $($tail:expr),* $(,)* ) => {
-        $head $( .either($tail) )*
+        $head $( .choice($tail) )*
     };
 }
 
@@ -711,6 +819,19 @@ macro_rules! args_map {
         { args_all! {
             $a1, $($a),*
         } } .map(|($var1, $($var),*)| $b)
+    };
+}
+
+#[macro_export]
+macro_rules! args_depend {
+    ( $only:expr ) => {
+        $only
+    };
+    ( $head:expr, $($tail:expr),* $(,)* ) => {
+        $head $( .depend($tail) )*
+            .option_map(
+                unflatten_closure!(a => (a) $(, $tail )*)
+            )
     };
 }
 
@@ -745,6 +866,86 @@ mod tests {
             .result
             .unwrap(),
             16
+        );
+    }
+
+    #[test]
+    fn depend() {
+        assert_eq!(
+            args_depend! {
+                opt::<u32>("f", "foo", "", ""),
+                opt::<u32>("b", "bar", "", ""),
+            }
+            .required()
+            .map(|(a, b)| a + b)
+            .parse_specified("".to_string(), &["--foo", "7", "--bar", "9"])
+            .result
+            .unwrap(),
+            16
+        );
+    }
+
+    #[test]
+    fn choice() {
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        enum E {
+            A,
+            B,
+            C(String),
+        }
+        let choice = args_choice! {
+            flag("a", "", "").some_if(E::A),
+            flag("b", "", "").some_if(E::B),
+            opt("c", "", "", "").option_map(|s| E::C(s)),
+        }
+        .required()
+        .parse_specified("".to_string(), &["-c", "foo"])
+        .result
+        .unwrap();
+        assert_eq!(choice, E::C("foo".to_string()));
+    }
+
+    #[test]
+    fn validate() {
+        let has_empty_switch = args_all! {
+            opt::<String>("", "", "doc", "hint"),
+            opt::<String>("c", "control", "", ""),
+        };
+        assert_eq!(
+            has_empty_switch.validate().unwrap_err(),
+            Invalid {
+                has_empty_switch: true,
+                ..Default::default()
+            }
+        );
+        let duplicate_switches = args_all! {
+            opt::<String>("a", "aa", "", ""),
+            opt::<String>("b", "aa", "", ""),
+            opt::<String>("a", "bb", "", ""),
+            opt::<String>("c", "control", "", ""),
+        };
+        assert_eq!(
+            duplicate_switches.validate().unwrap_err(),
+            Invalid {
+                duplicate_shorts: vec!["a".to_string()],
+                duplicate_longs: vec!["aa".to_string()],
+                ..Default::default()
+            }
+        );
+        let invalid_switches = args_all! {
+            opt::<String>("aa", "", "", ""),
+            opt::<String>("", "a", "", ""),
+            opt::<String>("a", "b", "", ""),
+            opt::<String>("bb", "aa", "", ""),
+            opt::<String>("c", "control", "", ""),
+        };
+        assert_eq!(
+            invalid_switches.validate().unwrap_err(),
+            Invalid {
+                one_char_longs: vec!["a".to_string(), "b".to_string()],
+                multi_char_shorts: vec!["aa".to_string(), "bb".to_string()],
+                ..Default::default()
+            }
         );
     }
 }
