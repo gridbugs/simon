@@ -1,4 +1,4 @@
-use arg::*;
+use crate::{SwitchCommon, SwitchShape, Switches};
 use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Display};
 
@@ -71,7 +71,7 @@ impl Display for Invalid {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct SwitchInfo {
     common: SwitchCommon,
-    arity: SwitchArity,
+    arity: SwitchShape,
 }
 
 #[derive(Default)]
@@ -169,7 +169,7 @@ impl Checker {
 }
 
 impl Switches for Checker {
-    fn add(&mut self, common: SwitchCommon, arity: SwitchArity) {
+    fn add(&mut self, common: SwitchCommon, arity: SwitchShape) {
         self.insert(SwitchInfo { common, arity });
     }
 }

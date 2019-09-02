@@ -1,266 +1,659 @@
-//! # Simon (an Arg Functor)
-//!
-//! A library for declaratively specifying and parsing command-line arguments.
-//!
-//! # Toy Example
-//!
-//! ```rust
-//! extern crate simon;
-//!
-//! let (name, age): (String, u8) =
-//!     simon::opt_required("n", "name", "your name", "NAME")
-//!        .both(
-//!           simon::opt("a", "age", "your age", "NUM")
-//!              .with_default(42)
-//!        )
-//!        .just_parse(&["--name", "Stephen", "-a", "26"])
-//!        .expect("Invalid command line argument");
-//!
-//! assert_eq!(name, "Stephen");
-//! assert_eq!(age, 26);
-//! ```
-//!
-//! # Usage
-//!
-//! Typical usage is to define a type to contain your command-line arguments
-//! (typically tuple or struct where each field corresponds to an argument), and
-//! then construct, from a library of combinators, a parser which knows how to
-//! parse a value of this type from command line arguments.
-//!
-//! At the core of this library is the [Arg] trait. Implementations of [Arg]
-//! know how to parse a value of a particular type ([Arg]'s associated type
-//! `Item`) out of command line arguments. This might be as simple as taking a
-//! string value directly from the command line arguments. More complicated
-//! [Arg] implementations combine multiple simpler [Arg]s together, or
-//! manipulate their output in some way. I'll sometimes refer to implementations
-//! of [Arg] where `type Item = Foo` as "parsers yielding a value of type
-//! `Foo`".
-//!
-//! The `ArgExt` struct is a wrapper around [Arg] implementations, adding
-//! methods which can be chained to create more complex parsers.
-//!
-//! This library provides "base" parsers, which parse individual command-line
-//! arguments, and "combinators" - methods of `ArgExt` which modify or combine
-//! simpler parsers. Base parsers for arguments which accept parameters have
-//! variants which yield values of inferred types, converted using [FromStr],
-//! and additional variants which yield values converted from strings by a
-//! provided conversion function.
-//! There are also a handful of macros for ergonomics, and
-//! simplifying some common patterns.
-//!
-//! In the example above, `opt_required` and `opt` are both parsers yielding
-//! values of inferred types (in this case [String] and [u8]), while
-//! `both` and `with_default` are combinators. The `both` combinators takes a
-//! pair of parsers, and creates a parser yielding the pair containing both
-//! parsers' outputs. The `with_default` combinator takes a parser which yields
-//! an optional value, and a value, and returns a parser which yields the
-//! provided value if a value was provided, and the default value otherwise.
-//!
-//! # Argument Types
-//!
-//! This library recognises 5 types of command line argument:
-//!
-//!  - a **flag** is a named argument with no parameter which may appear 0 or 1
-//!  times. Base parsers of flags yield `bool` values which are `true` when an
-//!  argument appears once, and `false` otherwise.
-//!  - a **multi_flag** is a named argument with no parameter which may appear an
-//!  arbitrary number of times. Base parsers of multi_flags yield `usize` values
-//!  equal to the number of times the argument was passed.
-//!  - an **opt** is a named argument with a parameter, which may appear 0 or 1 times.
-//!  Base parsers of opts yield `Option<String>` values which are `Some(<value>)`
-//!  if the argument was passed, and `None` otherwise.
-//!  - a **multi_opt** is a named argument with a value which may appear an
-//!  arbitrary number of times. The argument name must appear before each value.
-//!  Base parsers of multi_opts yield `Vec<String>`
-//!  values, with an element for each value that was passed.
-//!  - a **free** is an unnamed argument. An arbitrary number of frees may be
-//!  passed. Base parsers of frees yield 'Vec<String>` values, with an element
-//!  for each value that was passed.
-//!
-//! # Errors
-//!
-//! ## Parse Errors
-//!
-//! Parse errors are the result of invalid command-line arguments being passed
-//! to a program.
-//! In addition to the `Item` associated type, the [Arg] trait has an additional
-//! associated type named `Error`. Implementations of [Arg] can use this type to
-//! return errors detected during parsing. Combinators typically propagate
-//! errors of child parsers through their own `Error`s, though they are of
-//! course free to handle these errors themselves. Some example parse errors:
-//!
-//! - missing required arguments
-//! - parameters passed which can't be converted to the required type
-//! - passing multiple mutually exclusive arguments
-//!
-//! ## Spec Errors
-//!
-//! Spec errors are problems with the specification of arguments themselves.
-//! Some examples of spec errors:
-//!
-//! - specifying the same argument name multiple times
-//! - specifying a short name longer than 1 character
-//! - specifying a long name with a length of 1 character
-//! - specifying neither a short name, nor a long name
-//!
-//! Since spec errors don't depend on the specific arguments passed to a
-//! program, running a program once is usually enough to convince yourself that
-//! it is free of these errors. As such, spec errors cause panics while parsing.
-//!
-//! If however, your program's arguments are
-//! generated dynamically (such as from a config file or locale), you want a way
-//! to handle spec errors. The combinator [ArgExt::valid] creates a parser
-//! which treats spec errors as if they were parse errors - returning an error during
-//! parsing rather than panicking.
-//!
-//! # Parsing real command-line arguments
-//!
-//! The [Toy Example](#toy-example) above specified the arguments in a slice. In practice, most
-//! programs will read actual command-line arguments. Methods for running
-//! a parser on real command-line arguments are [ArgExt::parse_env] and
-//! [ArgExt::parse_env_or_exit], and their variants.
-//!
-//! # Help and Usage
-//!
-//! The combinator [ArgExt::with_help] creates a parser which accepts a help flag.
-//! The [ArgExt::with_help_default] combinator is the same, but it uses the flag
-//! "-h" and "--help".
-//!
-//! The [ArgExt::parse_env] function returns a [Usage] in addition to a parsed
-//! value or error, which can be rendered ([Usage::render]) to produce
-//! documentation on arguments, suitable for printing when help was requested,
-//! or the user have invalid input.
-//!
-//! The methods [ArgExt::parse_env_or_exit] and
-//! [ArgExt::parse_env_default_or_exit] are only available on values
-//! produced by [ArgExt::with_help] and [ArgExt::with_help_default]
-//! irrespectively. These functions run the parser on the program's command-line
-//! arguments, and print usage and exit if a parser error was detected, or help
-//! was requested, and returns the parsed value otherwise.
 extern crate getopts;
 
-pub mod arg;
-pub mod ext;
-pub mod util;
-pub mod validation;
-
-pub use arg::Arg;
-use arg::*;
-pub use ext::ArgExt;
-pub use ext::HelpOr;
-use ext::*;
-use std::fmt::{Debug, Display};
+use std::env;
+use std::ffi::OsStr;
+use std::fmt;
+use std::process;
 use std::str::FromStr;
 
-pub fn free_str() -> ArgExt<impl Arg<Item = Vec<String>>> {
-    ext(Free)
+mod util;
+mod validation;
+pub use util::Never;
+pub use validation::Invalid;
+
+pub type Matches = getopts::Matches;
+
+#[derive(Hash, PartialEq, Eq, Clone, Debug)]
+pub struct SwitchCommon {
+    pub short: String,
+    pub long: String,
+    pub doc: String,
 }
 
-pub fn free_by<F, T, E>(f: F) -> ArgExt<impl Arg<Item = Vec<T>>>
+impl SwitchCommon {
+    fn new(short: &str, long: &str, doc: &str) -> Self {
+        Self {
+            short: short.to_string(),
+            long: long.to_string(),
+            doc: doc.to_string(),
+        }
+    }
+
+    fn key_to_search_in_matches(&self) -> &str {
+        if self.short.len() != 0 {
+            self.short.as_str()
+        } else {
+            self.long.as_str()
+        }
+    }
+}
+
+#[derive(Hash, PartialEq, Eq, Clone, Debug)]
+pub enum SwitchShape {
+    Flag,
+    Opt { hint: String },
+}
+
+pub trait Switches {
+    fn add(&mut self, common: SwitchCommon, shape: SwitchShape);
+}
+
+impl Switches for getopts::Options {
+    fn add(&mut self, common: SwitchCommon, arity: SwitchShape) {
+        match arity {
+            SwitchShape::Flag => {
+                self.optflag(
+                    common.short.as_str(),
+                    common.long.as_str(),
+                    common.doc.as_str(),
+                );
+            }
+            SwitchShape::Opt { hint } => {
+                self.optopt(
+                    common.short.as_str(),
+                    common.long.as_str(),
+                    common.doc.as_str(),
+                    hint.as_str(),
+                );
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum TopLevelError<E> {
+    Getopts(getopts::Fail),
+    Other(E),
+}
+
+impl<E: fmt::Display> fmt::Display for TopLevelError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            Self::Getopts(fail) => fmt::Display::fmt(&fail, f),
+            Self::Other(other) => fmt::Display::fmt(&other, f),
+        }
+    }
+}
+
+pub struct Usage {
+    opts: getopts::Options,
+    program_name: String,
+}
+
+impl Usage {
+    pub fn render(&self) -> String {
+        let brief = format!("Usage: {} [options]", &self.program_name);
+        self.opts.usage(&brief)
+    }
+}
+
+pub struct ParseResult<I, E> {
+    pub usage: Usage,
+    pub result: Result<I, TopLevelError<E>>,
+}
+
+pub trait Arg: Sized {
+    type Item;
+    type Error: fmt::Debug + fmt::Display;
+    fn update_switches<S: Switches>(&self, switches: &mut S);
+    fn name(&self) -> String;
+    fn get(self, matches: &Matches) -> Result<Self::Item, Self::Error>;
+    fn validate(&self) -> Option<Invalid> {
+        let mut checker = validation::Checker::default();
+        self.update_switches(&mut checker);
+        checker.invalid()
+    }
+    fn parse_specified_ignoring_validation<I>(
+        self,
+        program_name: String,
+        args: I,
+    ) -> ParseResult<Self::Item, Self::Error>
+    where
+        I: IntoIterator,
+        I::Item: AsRef<OsStr>,
+    {
+        let mut opts = getopts::Options::new();
+        self.update_switches(&mut opts);
+        ParseResult {
+            result: opts
+                .parse(args)
+                .map_err(TopLevelError::Getopts)
+                .and_then(|matches| self.get(&matches).map_err(TopLevelError::Other)),
+            usage: Usage { opts, program_name },
+        }
+    }
+    fn parse_specified<I>(
+        self,
+        program_name: String,
+        args: I,
+    ) -> ParseResult<Self::Item, Self::Error>
+    where
+        I: IntoIterator,
+        I::Item: AsRef<OsStr>,
+    {
+        if let Some(invalid) = self.validate() {
+            panic!("Invalid command spec:\n{}", invalid);
+        }
+        self.parse_specified_ignoring_validation(program_name, args)
+    }
+    fn parse_env(self) -> ParseResult<Self::Item, Self::Error> {
+        let args = env::args().collect::<Vec<_>>();
+        let program_name = args[0].clone();
+        self.parse_specified(program_name, &args[1..])
+    }
+    fn with_help(self, help_flag: Flag) -> WithHelp<Self> {
+        WithHelp {
+            arg: self,
+            help_flag,
+        }
+    }
+    fn with_help_default(self) -> WithHelp<Self> {
+        self.with_help(Flag::new("h", "help", "print this help menu"))
+    }
+    fn option_map<F, T, U>(self, f: F) -> OptionMap<Self, F>
+    where
+        F: FnOnce(T) -> U,
+    {
+        OptionMap { arg: self, f }
+    }
+    fn with_default<T>(self, default_value: T) -> WithDefault<Self, T> {
+        WithDefault {
+            arg: self,
+            default_value,
+        }
+    }
+    fn choice<O>(self, other: O) -> Choice<Self, O>
+    where
+        O: Arg<Item = Self::Item>,
+    {
+        Choice { a: self, b: other }
+    }
+    fn both<O>(self, other: O) -> Both<Self, O>
+    where
+        O: Arg<Item = Self::Item>,
+    {
+        Both { a: self, b: other }
+    }
+    fn map<F, U>(self, f: F) -> Map<Self, F>
+    where
+        F: FnOnce(Self::Item) -> U,
+    {
+        Map { arg: self, f }
+    }
+    fn required(self) -> Required<Self> {
+        Required { arg: self }
+    }
+    fn option_convert_string<F, T, E>(self, f: F) -> OptionConvertString<Self, F>
+    where
+        F: FnOnce(&str) -> Result<T, E>,
+    {
+        OptionConvertString { arg: self, f }
+    }
+}
+
+pub struct Flag {
+    common: SwitchCommon,
+}
+
+impl Flag {
+    pub fn new(short: &str, long: &str, doc: &str) -> Self {
+        Self {
+            common: SwitchCommon::new(short, long, doc),
+        }
+    }
+}
+impl Arg for Flag {
+    type Item = bool;
+    type Error = Never;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        switches.add(self.common.clone(), SwitchShape::Flag);
+    }
+    fn name(&self) -> String {
+        self.common.long.clone()
+    }
+    fn get(self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        Ok(matches.opt_present(self.common.key_to_search_in_matches()))
+    }
+}
+
+pub struct Opt {
+    common: SwitchCommon,
+    hint: String,
+}
+
+impl Opt {
+    pub fn new(short: &str, long: &str, doc: &str, hint: &str) -> Self {
+        Self {
+            common: SwitchCommon::new(short, long, doc),
+            hint: hint.to_string(),
+        }
+    }
+}
+
+impl Arg for Opt {
+    type Item = Option<String>;
+    type Error = Never;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        switches.add(
+            self.common.clone(),
+            SwitchShape::Opt {
+                hint: self.hint.clone(),
+            },
+        );
+    }
+    fn name(&self) -> String {
+        self.common.long.clone()
+    }
+    fn get(self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        Ok(matches.opt_str(self.common.key_to_search_in_matches()))
+    }
+}
+
+pub struct WithHelp<A> {
+    arg: A,
+    help_flag: Flag,
+}
+
+pub enum OrHelp<T> {
+    Value(T),
+    Help,
+}
+
+impl<A> Arg for WithHelp<A>
 where
-    F: Fn(String) -> Result<T, E>,
-    E: Clone + Debug + Display,
+    A: Arg,
 {
-    free_str().vec_convert(f)
+    type Item = OrHelp<A::Item>;
+    type Error = A::Error;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.arg.update_switches(switches);
+        self.help_flag.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        format!("({}) with help", self.arg.name())
+    }
+    fn get(self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        if Never::result_ok(self.help_flag.get(matches)) {
+            Ok(OrHelp::Help)
+        } else {
+            self.arg.get(matches).map(OrHelp::Value)
+        }
+    }
 }
 
-pub fn free<T>() -> ArgExt<impl Arg<Item = Vec<T>>>
+impl<A> WithHelp<A>
 where
-    T: FromStr + Debug + Display,
-    <T as FromStr>::Err: Clone + Debug + Display,
+    A: Arg,
 {
-    free_by(|s| s.parse())
+    pub fn parse_env_or_exit(self) -> A::Item {
+        let result = self.parse_env();
+        match result.result {
+            Ok(OrHelp::Value(a)) => a,
+            Ok(OrHelp::Help) => {
+                print!("{}", result.usage.render());
+                process::exit(0);
+            }
+            Err(e) => {
+                eprint!("{}\n\n", e);
+                eprint!("{}", result.usage.render());
+                process::exit(1);
+            }
+        }
+    }
 }
 
-pub fn flag(short: &str, long: &str, doc: &str) -> ArgExt<impl Arg<Item = bool>> {
-    ext(Flag::new(short, long, doc))
-}
-
-pub fn multi_flag(short: &str, long: &str, doc: &str) -> ArgExt<impl Arg<Item = usize>> {
-    ext(MultiFlag::new(short, long, doc))
-}
-
-pub fn opt_str(
-    short: &str,
-    long: &str,
-    doc: &str,
-    hint: &str,
-) -> ArgExt<impl Arg<Item = Option<String>>> {
-    ext(Opt::new(short, long, doc, hint))
-}
-
-pub fn opt_by<F, T, E>(
-    short: &str,
-    long: &str,
-    doc: &str,
-    hint: &str,
+pub struct OptionMap<A, F>
+where
+    A: Arg,
+{
+    arg: A,
     f: F,
-) -> ArgExt<impl Arg<Item = Option<T>>>
-where
-    F: Fn(String) -> Result<T, E>,
-    E: Clone + Debug + Display,
-{
-    opt_str(short, long, doc, hint).option_convert(f)
 }
 
-pub fn opt_by_default<F, T, E>(
-    short: &str,
-    long: &str,
-    doc: &str,
-    hint: &str,
-    default: T,
-    f: F,
-) -> ArgExt<impl Arg<Item = T>>
+impl<A, F, T, U> Arg for OptionMap<A, F>
 where
-    F: Fn(String) -> Result<T, E>,
-    E: Clone + Debug + Display,
-    T: Clone + Display,
+    A: Arg<Item = Option<T>>,
+    F: FnOnce(T) -> U,
 {
-    opt_str(
-        short,
-        long,
-        format!("{} (default: {})", doc, default).as_str(),
-        hint,
-    )
-    .option_convert(f)
-    .with_default(default)
+    type Item = Option<U>;
+    type Error = A::Error;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.arg.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        self.arg.name()
+    }
+    fn get(self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        let Self { arg, f } = self;
+        arg.get(matches).map(|x| x.map(f))
+    }
 }
 
-pub fn opt_by_default_str<F, T, E>(
-    short: &str,
-    long: &str,
-    doc: &str,
-    hint: &str,
-    default: &str,
-    f: F,
-) -> ArgExt<impl Arg<Item = T>>
+pub struct WithDefault<A, T>
 where
-    F: Fn(String) -> Result<T, E>,
-    E: Clone + Debug + Display,
+    A: Arg,
 {
-    opt_str(
-        short,
-        long,
-        format!("{} (default: {})", doc, default).as_str(),
-        hint,
-    )
-    .with_default(default.to_string())
-    .convert(f)
+    arg: A,
+    default_value: T,
 }
 
-pub fn opt_by_required<F, T, E>(
-    short: &str,
-    long: &str,
-    doc: &str,
-    hint: &str,
-    f: F,
-) -> ArgExt<impl Arg<Item = T>>
+impl<A, T> Arg for WithDefault<A, T>
 where
-    F: Fn(String) -> Result<T, E>,
-    E: Clone + Debug + Display,
-    T: Display,
+    A: Arg<Item = Option<T>>,
 {
-    opt_str(short, long, doc, hint).option_convert(f).required()
+    type Item = T;
+    type Error = A::Error;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.arg.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        self.arg.name()
+    }
+    fn get(self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        let Self { arg, default_value } = self;
+        arg.get(matches).map(|x| x.unwrap_or(default_value))
+    }
+}
+
+pub struct Choice<A, B>
+where
+    A: Arg,
+    B: Arg,
+{
+    a: A,
+    b: B,
+}
+
+#[derive(Debug)]
+pub enum ChoiceError<A, B> {
+    A(A),
+    B(B),
+    MultipleMutuallyExclusiveArgs { a: String, b: String },
+}
+
+impl<A, B> fmt::Display for ChoiceError<A, B>
+where
+    A: fmt::Display,
+    B: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            Self::A(a) => a.fmt(f),
+            Self::B(b) => b.fmt(f),
+            Self::MultipleMutuallyExclusiveArgs { a, b } => {
+                write!(f, "({}) and ({}) are mutually exclusive", a, b)
+            }
+        }
+    }
+}
+
+impl<A, B, T> Arg for Choice<A, B>
+where
+    A: Arg<Item = Option<T>>,
+    B: Arg<Item = Option<T>>,
+{
+    type Item = Option<T>;
+    type Error = ChoiceError<A::Error, B::Error>;
+
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.a.update_switches(switches);
+        self.b.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        format!("choose ({}) or ({})", self.a.name(), self.b.name())
+    }
+    fn get(self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        let Self { a, b } = self;
+        let multiple_mutually_exclusive_args =
+            ChoiceError::MultipleMutuallyExclusiveArgs {
+                a: a.name(),
+                b: b.name(),
+            };
+
+        if let Some(a_value) = a.get(matches).map_err(ChoiceError::A)? {
+            if b.get(matches).map_err(ChoiceError::B)?.is_some() {
+                Err(multiple_mutually_exclusive_args)
+            } else {
+                Ok(Some(a_value))
+            }
+        } else {
+            b.get(matches).map_err(ChoiceError::B)
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum BothError<A, B> {
+    A(A),
+    B(B),
+}
+
+impl<A, B> fmt::Display for BothError<A, B>
+where
+    A: fmt::Display,
+    B: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            Self::A(a) => a.fmt(f),
+            Self::B(b) => b.fmt(f),
+        }
+    }
+}
+
+pub struct Both<A, B>
+where
+    A: Arg,
+    B: Arg,
+{
+    a: A,
+    b: B,
+}
+
+impl<A, B> Arg for Both<A, B>
+where
+    A: Arg,
+    B: Arg,
+{
+    type Item = (A::Item, B::Item);
+    type Error = BothError<A::Error, B::Error>;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.a.update_switches(switches);
+        self.b.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        format!("({} and {})", self.a.name(), self.b.name())
+    }
+    fn get(self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        Ok((
+            self.a.get(matches).map_err(BothError::A)?,
+            self.b.get(matches).map_err(BothError::B)?,
+        ))
+    }
+}
+
+pub struct Map<A, F>
+where
+    A: Arg,
+{
+    arg: A,
+    f: F,
+}
+impl<A, U, F> Arg for Map<A, F>
+where
+    A: Arg,
+    F: FnOnce(A::Item) -> U,
+{
+    type Item = U;
+    type Error = A::Error;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.arg.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        self.arg.name()
+    }
+    fn get(self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        let Self { arg, f } = self;
+        arg.get(matches).map(f)
+    }
+}
+
+pub struct Value<T> {
+    value: T,
+    name: String,
+}
+
+impl<T> Value<T> {
+    pub fn new(name: &str, value: T) -> Self {
+        Self {
+            name: name.to_string(),
+            value,
+        }
+    }
+}
+
+impl<T> Arg for Value<T> {
+    type Item = T;
+    type Error = Never;
+    fn update_switches<S: Switches>(&self, _switches: &mut S) {}
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+    fn get(self, _matches: &Matches) -> Result<Self::Item, Self::Error> {
+        Ok(self.value)
+    }
+}
+
+pub struct Required<A>
+where
+    A: Arg,
+{
+    arg: A,
+}
+
+#[derive(Debug)]
+pub enum RequiredError<A> {
+    Arg(A),
+    MissingRequiredArg { name: String },
+}
+
+impl<A> fmt::Display for RequiredError<A>
+where
+    A: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            Self::Arg(a) => a.fmt(f),
+            Self::MissingRequiredArg { name } => {
+                write!(f, "missing required argument ({})", name)
+            }
+        }
+    }
+}
+
+impl<A, T> Arg for Required<A>
+where
+    A: Arg<Item = Option<T>>,
+{
+    type Item = T;
+    type Error = RequiredError<A::Error>;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.arg.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        self.arg.name()
+    }
+    fn get(self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        let name = self.arg.name();
+        if let Some(x) = self.arg.get(matches).map_err(RequiredError::Arg)? {
+            Ok(x)
+        } else {
+            Err(RequiredError::MissingRequiredArg { name })
+        }
+    }
+}
+
+pub struct OptionConvertString<A, F>
+where
+    A: Arg,
+{
+    arg: A,
+    f: F,
+}
+
+#[derive(Debug)]
+pub enum OptionConvertStringError<A, E> {
+    Arg(A),
+    FailedToConvert {
+        name: String,
+        arg_string: String,
+        error: E,
+    },
+}
+
+impl<A, E> fmt::Display for OptionConvertStringError<A, E>
+where
+    A: fmt::Display,
+    E: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            Self::Arg(a) => a.fmt(f),
+            Self::FailedToConvert {
+                name,
+                arg_string,
+                error,
+            } => write!(
+                f,
+                "failed to convert argument ({}). \"{}\" could not be parsed (error: {})",
+                name, arg_string, error
+            ),
+        }
+    }
+}
+
+impl<A, F, T, E> Arg for OptionConvertString<A, F>
+where
+    A: Arg<Item = Option<String>>,
+    F: FnOnce(&str) -> Result<T, E>,
+    E: fmt::Display + fmt::Debug,
+{
+    type Item = Option<T>;
+    type Error = OptionConvertStringError<A::Error, E>;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.arg.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        self.arg.name()
+    }
+    fn get(self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        let name = self.name();
+        let Self { arg, f } = self;
+        match arg.get(matches).map_err(OptionConvertStringError::Arg)? {
+            None => Ok(None),
+            Some(arg_string) => f(arg_string.as_str()).map(Some).map_err(|error| {
+                OptionConvertStringError::FailedToConvert {
+                    name,
+                    arg_string,
+                    error,
+                }
+            }),
+        }
+    }
+}
+
+pub fn flag(short: &str, long: &str, doc: &str) -> impl Arg<Item = bool> {
+    Flag::new(short, long, doc)
 }
 
 pub fn opt<T>(
@@ -268,112 +661,12 @@ pub fn opt<T>(
     long: &str,
     doc: &str,
     hint: &str,
-) -> ArgExt<impl Arg<Item = Option<T>>>
-where
-    T: FromStr + Debug + Display,
-    <T as FromStr>::Err: Clone + Debug + Display,
-{
-    opt_by(short, long, doc, hint, |s| s.parse())
-}
-
-pub fn opt_default<T>(
-    short: &str,
-    long: &str,
-    doc: &str,
-    hint: &str,
-    default: T,
-) -> ArgExt<impl Arg<Item = T>>
-where
-    T: Clone + FromStr + Debug + Display,
-    <T as FromStr>::Err: Clone + Debug + Display,
-{
-    opt_str(
-        short,
-        long,
-        format!("{} (default: {})", doc, default).as_str(),
-        hint,
-    )
-    .option_convert(|s| s.parse())
-    .with_default(default)
-}
-
-pub fn opt_default_str<T>(
-    short: &str,
-    long: &str,
-    doc: &str,
-    hint: &str,
-    default: &str,
-) -> ArgExt<impl Arg<Item = T>>
+) -> impl Arg<Item = Option<T>>
 where
     T: FromStr,
-    <T as FromStr>::Err: Clone + Debug + Display,
+    <T as FromStr>::Err: fmt::Debug + fmt::Display,
 {
-    opt_str(
-        short,
-        long,
-        format!("{} (default: {})", doc, default).as_str(),
-        hint,
-    )
-    .with_default(default.to_string())
-    .convert(|s| s.parse())
-}
-
-pub fn opt_required<T>(
-    short: &str,
-    long: &str,
-    doc: &str,
-    hint: &str,
-) -> ArgExt<impl Arg<Item = T>>
-where
-    T: FromStr + Debug + Display,
-    <T as FromStr>::Err: Clone + Debug + Display,
-{
-    opt_str(short, long, doc, hint)
-        .option_convert(|s| s.parse())
-        .required()
-}
-
-pub fn multi_opt_str(
-    short: &str,
-    long: &str,
-    doc: &str,
-    hint: &str,
-) -> ArgExt<impl Arg<Item = Vec<String>>> {
-    ext(MultiOpt::new(short, long, doc, hint))
-}
-
-pub fn multi_opt_by<F, T, E>(
-    short: &str,
-    long: &str,
-    doc: &str,
-    hint: &str,
-    f: F,
-) -> ArgExt<impl Arg<Item = Vec<T>>>
-where
-    F: Fn(String) -> Result<T, E>,
-    E: Clone + Debug + Display,
-{
-    multi_opt_str(short, long, doc, hint).vec_convert(f)
-}
-
-pub fn multi_opt<T>(
-    short: &str,
-    long: &str,
-    doc: &str,
-    hint: &str,
-) -> ArgExt<impl Arg<Item = Vec<T>>>
-where
-    T: FromStr + Debug + Display,
-    <T as FromStr>::Err: Clone + Debug + Display,
-{
-    multi_opt_by(short, long, doc, hint, |s| s.parse())
-}
-
-pub fn value<T>(name: &str, value: T) -> ArgExt<impl Arg<Item = T>>
-where
-    T: Clone,
-{
-    ext(Value::new(name, value))
+    Opt::new(short, long, doc, hint).option_convert_string(|s| s.parse())
 }
 
 #[macro_export]
@@ -400,15 +693,12 @@ macro_rules! args_all {
 }
 
 #[macro_export]
-macro_rules! args_all_depend {
+macro_rules! args_either {
     ( $only:expr ) => {
         $only
     };
     ( $head:expr, $($tail:expr),* $(,)* ) => {
-        $head $( .depend($tail) )*
-            .option_map(
-                unflatten_closure!(a => (a) $(, $tail )*)
-            )
+        $head $( .either($tail) )*
     };
 }
 
@@ -424,24 +714,17 @@ macro_rules! args_map {
     };
 }
 
-#[macro_export]
-macro_rules! args_either {
-    ( $only:expr ) => {
-        $only
-    };
-    ( $head:expr, $($tail:expr),* $(,)* ) => {
-        $head $( .either($tail) )*
-    };
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn basic() {
         assert_eq!(
-            opt_required::<u32>("f", "foo", "", "")
-                .just_parse(&["--foo", "42"])
+            opt::<u32>("f", "foo", "", "")
+                .required()
+                .parse_specified("".to_string(), &["--foo", "42"])
+                .result
                 .unwrap(),
             42
         );
@@ -452,211 +735,16 @@ mod tests {
         assert_eq!(
             args_map! {
                 let {
-                    a = opt_required::<u32>("f", "foo", "", "");
-                    b = opt_required::<u32>("b", "bar", "", "");
+                    a = opt::<u32>("f", "foo", "", "").required();
+                    b = opt::<u32>("b", "bar", "", "").required();
                 } in {
                     a + b
                 }
             }
-            .just_parse(&["--foo", "7", "--bar", "9"])
+            .parse_specified("".to_string(), &["--foo", "7", "--bar", "9"])
+            .result
             .unwrap(),
             16
         );
-    }
-
-    #[test]
-    fn args_all_depend() {
-        assert_eq!(
-            args_all_depend! {
-                opt::<u32>("f", "foo", "", ""),
-                opt::<u32>("b", "bar", "", ""),
-            }
-            .required()
-            .map(|(a, b)| a + b)
-            .just_parse(&["--foo", "7", "--bar", "9"])
-            .unwrap(),
-            16
-        );
-    }
-
-    #[test]
-    fn validation() {
-        let no_args: &[&'static str] = &[];
-        let has_empty_switch = args_all! {
-            opt_str("", "", "doc", "hint"),
-            opt_str("c", "control", "", ""),
-        }
-        .valid();
-        let duplicate_switches = args_all! {
-            opt_str("a", "aa", "", ""),
-            opt_str("b", "aa", "", ""),
-            opt_str("a", "bb", "", ""),
-            opt_str("c", "control", "", ""),
-        }
-        .valid();
-        let invalid_switches = args_all! {
-            opt_str("aa", "", "", ""),
-            opt_str("", "a", "", ""),
-            opt_str("a", "b", "", ""),
-            opt_str("bb", "aa", "", ""),
-            opt_str("c", "control", "", ""),
-        }
-        .valid();
-
-        match has_empty_switch.just_parse(no_args).unwrap_err() {
-            TopLevelError::Other(ValidError::Invalid(invalid)) => {
-                assert_eq!(
-                    invalid,
-                    validation::Invalid {
-                        has_empty_switch: true,
-                        ..Default::default()
-                    }
-                );
-            }
-            other => panic!("{:?}", other),
-        }
-
-        match duplicate_switches.just_parse(no_args).unwrap_err() {
-            TopLevelError::Other(ValidError::Invalid(invalid)) => {
-                assert_eq!(
-                    invalid,
-                    validation::Invalid {
-                        duplicate_shorts: vec!["a".to_string()],
-                        duplicate_longs: vec!["aa".to_string()],
-                        ..Default::default()
-                    }
-                );
-            }
-            other => panic!("{:?}", other),
-        }
-
-        match invalid_switches.just_parse(no_args).unwrap_err() {
-            TopLevelError::Other(ValidError::Invalid(invalid)) => {
-                assert_eq!(
-                    invalid,
-                    validation::Invalid {
-                        one_char_longs: vec!["a".to_string(), "b".to_string()],
-                        multi_char_shorts: vec!["aa".to_string(), "bb".to_string()],
-                        ..Default::default()
-                    }
-                );
-            }
-            other => panic!("{:?}", other),
-        }
-    }
-
-    #[test]
-    fn either() {
-        #[derive(Debug, Clone, PartialEq, Eq)]
-        enum E {
-            A,
-            B,
-            C(String),
-        }
-
-        let choice = args_either! {
-            flag("a", "", "").some_if(E::A),
-            flag("b", "", "").some_if(E::B),
-            opt("c", "", "", "").option_map(|s| E::C(s)),
-        }
-        .required()
-        .just_parse(&["-c", "foo"])
-        .unwrap();
-
-        assert_eq!(choice, E::C("foo".to_string()));
-    }
-
-    #[test]
-    fn deep_recursion() {
-        let _ = value("", Some(42))
-            .option_map(|x| x)
-            .option_map(|x| x)
-            .option_map(|x| x)
-            .option_map(|x| x)
-            .option_map(|x| x)
-            .option_map(|x| x)
-            .option_map(|x| x)
-            .option_map(|x| x)
-            .option_map(|x| x)
-            .option_map(|x| x)
-            .option_map(|x| x)
-            .option_map(|x| x)
-            .option_map(|x| x)
-            .option_map(|x| x)
-            .option_map(|x| x)
-            .option_map(|x| x)
-            .option_map(|x| x)
-            .option_map(|x| x)
-            .option_map(|x| x)
-            .option_map(|x| x)
-            .option_map(|x| x);
-
-        let _ = value("", vec![1, 2, 3])
-            .vec_map(|x| x + 1)
-            .vec_map(|x| x + 1)
-            .vec_map(|x| x + 1)
-            .vec_map(|x| x + 1)
-            .vec_map(|x| x + 1)
-            .vec_map(|x| x + 1)
-            .vec_map(|x| x + 1)
-            .vec_map(|x| x + 1)
-            .vec_map(|x| x + 1)
-            .vec_map(|x| x + 1)
-            .vec_map(|x| x + 1)
-            .vec_map(|x| x + 1)
-            .vec_map(|x| x + 1)
-            .vec_map(|x| x + 1)
-            .vec_map(|x| x + 1)
-            .vec_map(|x| x + 1)
-            .vec_map(|x| x + 1)
-            .vec_map(|x| x + 1)
-            .vec_map(|x| x + 1)
-            .vec_map(|x| x + 1)
-            .vec_map(|x| x + 1);
-
-        let _ = args_all! {
-            value("", 1),
-            value("", 1),
-            value("", 1),
-            value("", 1),
-            value("", 1),
-            value("", 1),
-            value("", 1),
-            value("", 1),
-            value("", 1),
-            value("", 1),
-            value("", 1),
-            value("", 1),
-            value("", 1),
-            value("", 1),
-            value("", 1),
-            value("", 1),
-            value("", 1),
-            value("", 1),
-            value("", 1),
-        };
-
-        let _ = args_all_depend! {
-            value("", Some(1)),
-            value("", Some(1)),
-            value("", Some(1)),
-            value("", Some(1)),
-            value("", Some(1)),
-            value("", Some(1)),
-            value("", Some(1)),
-            value("", Some(1)),
-            value("", Some(1)),
-            value("", Some(1)),
-            value("", Some(1)),
-            value("", Some(1)),
-            value("", Some(1)),
-            value("", Some(1)),
-            value("", Some(1)),
-            value("", Some(1)),
-            value("", Some(1)),
-            value("", Some(1)),
-            value("", Some(1)),
-            value("", Some(1)),
-        };
     }
 }
