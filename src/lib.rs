@@ -197,6 +197,12 @@ pub trait Arg: Sized {
     fn required(self) -> Required<Self> {
         Required { arg: self }
     }
+    fn convert_string<F, T, E>(self, f: F) -> ConvertString<Self, F>
+    where
+        F: FnOnce(&str) -> Result<T, E>,
+    {
+        ConvertString { arg: self, f }
+    }
     fn option_convert_string<F, T, E>(self, f: F) -> OptionConvertString<Self, F>
     where
         F: FnOnce(&str) -> Result<T, E>,
@@ -613,6 +619,71 @@ where
         } else {
             Err(RequiredError::MissingRequiredArg { name })
         }
+    }
+}
+
+pub struct ConvertString<A, F>
+where
+    A: Arg,
+{
+    arg: A,
+    f: F,
+}
+
+#[derive(Debug)]
+pub enum ConvertStringError<A, E> {
+    Arg(A),
+    FailedToConvert {
+        name: String,
+        arg_string: String,
+        error: E,
+    },
+}
+
+impl<A, E> fmt::Display for ConvertStringError<A, E>
+where
+    A: fmt::Display,
+    E: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            Self::Arg(a) => a.fmt(f),
+            Self::FailedToConvert {
+                name,
+                arg_string,
+                error,
+            } => write!(
+                f,
+                "failed to convert argument ({}). \"{}\" could not be parsed (error: {})",
+                name, arg_string, error
+            ),
+        }
+    }
+}
+
+impl<A, F, T, E> Arg for ConvertString<A, F>
+where
+    A: Arg<Item = String>,
+    F: FnOnce(&str) -> Result<T, E>,
+    E: fmt::Display + fmt::Debug,
+{
+    type Item = T;
+    type Error = ConvertStringError<A::Error, E>;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.arg.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        self.arg.name()
+    }
+    fn get(self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        let name = self.name();
+        let Self { arg, f } = self;
+        let arg_string = arg.get(matches).map_err(ConvertStringError::Arg)?;
+        f(arg_string.as_str()).map_err(|error| ConvertStringError::FailedToConvert {
+            name,
+            arg_string,
+            error,
+        })
     }
 }
 
