@@ -49,8 +49,8 @@ pub trait Switches {
 }
 
 impl Switches for getopts::Options {
-    fn add(&mut self, common: SwitchCommon, arity: SwitchShape) {
-        match arity {
+    fn add(&mut self, common: SwitchCommon, shape: SwitchShape) {
+        match shape {
             SwitchShape::Flag => {
                 self.optflag(
                     common.short.as_str(),
@@ -203,6 +203,12 @@ pub trait Arg: Sized {
     {
         OptionConvertString { arg: self, f }
     }
+    fn vec_convert_string<F, T, E>(self, f: F) -> VecConvertString<Self, F>
+    where
+        F: FnMut(&str) -> Result<T, E>,
+    {
+        VecConvertString { arg: self, f }
+    }
     fn depend<O>(self, other: O) -> Depend<Self, O>
     where
         O: Arg,
@@ -272,6 +278,20 @@ impl Arg for Opt {
     }
 }
 
+pub struct Free;
+
+impl Arg for Free {
+    type Item = Vec<String>;
+    type Error = Never;
+    fn update_switches<S: Switches>(&self, _switches: &mut S) {}
+    fn name(&self) -> String {
+        "ARGS".to_string()
+    }
+    fn get(self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        Ok(matches.free.clone())
+    }
+}
+
 pub struct WithHelp<A> {
     arg: A,
     help_flag: Flag,
@@ -309,16 +329,16 @@ where
     A: Arg,
 {
     pub fn parse_env_or_exit(self) -> A::Item {
-        let result = self.parse_env();
-        match result.result {
+        let ParseResult { result, usage } = self.parse_env();
+        match result {
             Ok(OrHelp::Value(a)) => a,
             Ok(OrHelp::Help) => {
-                print!("{}", result.usage.render());
+                print!("{}", usage.render());
                 process::exit(0);
             }
             Err(e) => {
                 eprint!("{}\n\n", e);
-                eprint!("{}", result.usage.render());
+                eprint!("{}", usage.render());
                 process::exit(1);
             }
         }
@@ -665,6 +685,81 @@ where
     }
 }
 
+pub struct VecConvertString<A, F>
+where
+    A: Arg,
+{
+    arg: A,
+    f: F,
+}
+
+#[derive(Debug)]
+pub enum VecConvertStringError<A, E> {
+    Arg(A),
+    FailedToConvert {
+        name: String,
+        index: usize,
+        arg_string: String,
+        error: E,
+    },
+}
+
+impl<A, E> fmt::Display for VecConvertStringError<A, E>
+where
+    A: fmt::Display,
+    E: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            Self::Arg(a) => a.fmt(f),
+            Self::FailedToConvert {
+                name,
+                index,
+                arg_string,
+                error,
+            } => write!(
+                f,
+                "failed to convert argument \"{}\" in position ({}). \"{}\" could not be parsed (error: {})",
+                name, index, arg_string, error
+            ),
+        }
+    }
+}
+
+impl<A, F, T, E> Arg for VecConvertString<A, F>
+where
+    A: Arg<Item = Vec<String>>,
+    F: FnMut(&str) -> Result<T, E>,
+    E: fmt::Display + fmt::Debug,
+{
+    type Item = Vec<T>;
+    type Error = VecConvertStringError<A::Error, E>;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.arg.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        self.arg.name()
+    }
+    fn get(self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        let name = self.name();
+        let Self { arg, mut f } = self;
+        let mut vec_string = arg.get(matches).map_err(VecConvertStringError::Arg)?;
+        let mut vec_t = Vec::with_capacity(vec_string.len());
+        for (index, arg_string) in vec_string.drain(..).enumerate() {
+            let t = f(arg_string.as_str()).map_err(|error| {
+                VecConvertStringError::FailedToConvert {
+                    name: name.clone(),
+                    index,
+                    error,
+                    arg_string,
+                }
+            })?;
+            vec_t.push(t);
+        }
+        Ok(vec_t)
+    }
+}
+
 pub struct Depend<A, B>
 where
     A: Arg,
@@ -775,6 +870,14 @@ where
     <T as FromStr>::Err: fmt::Debug + fmt::Display,
 {
     Opt::new(short, long, doc, hint).option_convert_string(|s| s.parse())
+}
+
+pub fn free<T>() -> impl Arg<Item = Vec<T>>
+where
+    T: FromStr,
+    <T as FromStr>::Err: fmt::Debug + fmt::Display,
+{
+    Free.vec_convert_string(|s| s.parse())
 }
 
 #[macro_export]

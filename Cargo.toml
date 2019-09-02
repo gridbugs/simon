@@ -11,3 +11,12 @@ documentation = "https://docs.rs/simon"
 
 [dependencies]
 getopts = "0.2"
+
+[[example]]
+name = "dimensions"
+
+[[example]]
+name = "hello"
+
+[[example]]
+name = "area"
