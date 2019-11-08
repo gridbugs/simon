@@ -1092,16 +1092,28 @@ mod tests {
                 ..Default::default()
             }
         );
-        let duplicate_switches = args_all! {
+        let duplicate_shorts = args_all! {
             opt::<String>("a", "aa", "", ""),
-            opt::<String>("b", "aa", "", ""),
             opt::<String>("a", "bb", "", ""),
             opt::<String>("c", "control", "", ""),
         };
         assert_eq!(
-            duplicate_switches.validate().unwrap_err(),
+            duplicate_shorts.validate().unwrap_err(),
             Invalid {
                 duplicate_shorts: vec!["a".to_string()],
+                duplicate_longs: vec![],
+                ..Default::default()
+            }
+        );
+        let duplicate_longs = args_all! {
+            opt::<String>("a", "aa", "", ""),
+            opt::<String>("b", "aa", "", ""),
+            opt::<String>("c", "control", "", ""),
+        };
+        assert_eq!(
+            duplicate_longs.validate().unwrap_err(),
+            Invalid {
+                duplicate_shorts: vec![],
                 duplicate_longs: vec!["aa".to_string()],
                 ..Default::default()
             }

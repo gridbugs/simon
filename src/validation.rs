@@ -19,7 +19,7 @@ impl Invalid {
         multi_char_shorts: Vec<String>,
         has_empty_switch: bool,
     ) -> Option<Self> {
-        if duplicate_longs.is_empty()
+        if duplicate_shorts.is_empty()
             && duplicate_longs.is_empty()
             && one_char_longs.is_empty()
             && multi_char_shorts.is_empty()
@@ -74,7 +74,7 @@ struct SwitchInfo {
     arity: SwitchShape,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct SwitchTable {
     table: HashMap<String, HashSet<SwitchInfo>>,
 }
@@ -87,13 +87,19 @@ impl SwitchTable {
             .insert(info);
     }
     fn keys_with_multiple_values(&self) -> impl Iterator<Item = String> + '_ {
-        self.table
-            .iter()
-            .filter_map(|(k, v)| if v.len() > 1 { Some(k.clone()) } else { None })
+        self.table.iter().filter_map(
+            |(k, v)| {
+                if v.len() > 1 {
+                    Some(k.clone())
+                } else {
+                    None
+                }
+            },
+        )
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct InvalidNames {
     one_char_longs: Vec<String>,
     multi_char_shorts: Vec<String>,
@@ -116,7 +122,7 @@ impl InvalidNames {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct Duplicates {
     by_short: SwitchTable,
     by_long: SwitchTable,
@@ -135,7 +141,7 @@ impl Duplicates {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Checker {
     duplicates: Duplicates,
     invalid_names: InvalidNames,
