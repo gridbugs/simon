@@ -41,7 +41,7 @@ impl Invalid {
 impl Display for Invalid {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         assert!(
-            !(self.duplicate_longs.is_empty()
+            !(self.duplicate_shorts.is_empty()
                 && self.duplicate_longs.is_empty()
                 && self.one_char_longs.is_empty()
                 && self.multi_char_shorts.is_empty()
