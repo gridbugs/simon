@@ -1,7 +1,7 @@
 [package]
 name = "simon"
 description = "Library for declaratively specifying and parsing command line arguments"
-version = "0.3.1"
+version = "0.3.2"
 authors = ["Stephen Sherratt <stephen@sherra.tt>"]
 license = "MIT"
 readme = "README.md"
