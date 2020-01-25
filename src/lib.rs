@@ -1,5 +1,3 @@
-extern crate getopts;
-
 use std::env;
 use std::ffi::OsStr;
 use std::fmt;

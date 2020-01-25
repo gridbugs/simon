@@ -8,6 +8,7 @@ readme = "README.md"
 homepage = "https://github.com/stevebob/simon.git"
 repository = "https://github.com/stevebob/simon.git"
 documentation = "https://docs.rs/simon"
+edition = "2018"
 
 [dependencies]
 getopts = "0.2"
