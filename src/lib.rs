@@ -174,6 +174,12 @@ pub trait Arg: Sized {
             default_value,
         }
     }
+    fn with_default_lazy<F>(self, default_value_f: F) -> WithDefaultLazy<Self, F> {
+        WithDefaultLazy {
+            arg: self,
+            default_value_f,
+        }
+    }
     fn choice<O>(self, other: O) -> Choice<Self, O>
     where
         O: Arg<Item = Self::Item>,
@@ -399,6 +405,36 @@ where
     fn get(self, matches: &Matches) -> Result<Self::Item, Self::Error> {
         let Self { arg, default_value } = self;
         arg.get(matches).map(|x| x.unwrap_or(default_value))
+    }
+}
+
+pub struct WithDefaultLazy<A, F>
+where
+    A: Arg,
+{
+    arg: A,
+    default_value_f: F,
+}
+
+impl<A, F, T> Arg for WithDefaultLazy<A, F>
+where
+    A: Arg<Item = Option<T>>,
+    F: FnOnce() -> T,
+{
+    type Item = T;
+    type Error = A::Error;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.arg.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        self.arg.name()
+    }
+    fn get(self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        let Self {
+            arg,
+            default_value_f,
+        } = self;
+        arg.get(matches).map(|x| x.unwrap_or_else(default_value_f))
     }
 }
 
