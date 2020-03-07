@@ -991,7 +991,7 @@ macro_rules! unflatten_closure {
         |$p| $tup
     };
     ( $p:pat => ( $($tup:tt)* ), $head:expr $(, $tail:expr)* ) => {
-        unflatten_closure!( ($p, a) => ( $($tup)*, a) $(, $tail )* )
+        $crate::unflatten_closure!( ($p, a) => ( $($tup)*, a) $(, $tail )* )
     };
 }
 
@@ -1003,7 +1003,7 @@ macro_rules! args_all {
     ( $head:expr, $($tail:expr),* $(,)* ) => {
         $head $( .both($tail) )*
             .map(
-                unflatten_closure!(a => (a) $(, $tail )*)
+                $crate::unflatten_closure!(a => (a) $(, $tail )*)
             )
     };
 }
@@ -1024,7 +1024,7 @@ macro_rules! args_map {
         $a1.map(|$var1| $b)
     };
     ( let { $var1:ident = $a1:expr; $($var:ident = $a:expr;)+ } in { $b:expr } ) => {
-        { args_all! {
+        { $crate::args_all! {
             $a1, $($a),*
         } } .map(|($var1, $($var),*)| $b)
     };
@@ -1038,7 +1038,7 @@ macro_rules! args_depend {
     ( $head:expr, $($tail:expr),* $(,)* ) => {
         $head $( .depend($tail) )*
             .option_map(
-                unflatten_closure!(a => (a) $(, $tail )*)
+                $crate::unflatten_closure!(a => (a) $(, $tail )*)
             )
     };
 }
