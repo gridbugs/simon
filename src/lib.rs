@@ -921,7 +921,7 @@ where
         let mut args: Vec<T> = arg.get(matches).map_err(VecSingletonError::Arg)?;
         if let Some(item) = args.pop() {
             match args.len() {
-                1 => Ok(item),
+                0 => Ok(item),
                 number_of_arguments => {
                     Err(VecSingletonError::IncorrectNumberOfArguments {
                         number_of_arguments,
