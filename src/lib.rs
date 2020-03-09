@@ -219,6 +219,9 @@ pub trait Arg: Sized {
     {
         VecConvertString { arg: self, f }
     }
+    fn vec_singleton(self) -> VecSingleton<Self> {
+        VecSingleton { arg: self }
+    }
     fn depend<O>(self, other: O) -> Depend<Self, O>
     where
         O: Arg,
@@ -862,6 +865,76 @@ where
             vec_t.push(t);
         }
         Ok(vec_t)
+    }
+}
+
+pub struct VecSingleton<A>
+where
+    A: Arg,
+{
+    arg: A,
+}
+
+#[derive(Debug)]
+pub enum VecSingletonError<A> {
+    Arg(A),
+    IncorrectNumberOfArguments {
+        number_of_arguments: usize,
+        name: String,
+    },
+}
+
+impl<A> fmt::Display for VecSingletonError<A>
+where
+    A: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match self {
+            Self::Arg(a) => a.fmt(f),
+            Self::IncorrectNumberOfArguments {
+                number_of_arguments,
+                name,
+            } => write!(
+                f,
+                "exactly one arguments was expected for {} ({} found)",
+                name, number_of_arguments
+            ),
+        }
+    }
+}
+
+impl<A, T> Arg for VecSingleton<A>
+where
+    A: Arg<Item = Vec<T>>,
+{
+    type Item = T;
+    type Error = VecSingletonError<A::Error>;
+    fn update_switches<S: Switches>(&self, switches: &mut S) {
+        self.arg.update_switches(switches);
+    }
+    fn name(&self) -> String {
+        self.arg.name()
+    }
+    fn get(self, matches: &Matches) -> Result<Self::Item, Self::Error> {
+        let name = self.name();
+        let Self { arg } = self;
+        let mut args: Vec<T> = arg.get(matches).map_err(VecSingletonError::Arg)?;
+        if let Some(item) = args.pop() {
+            match args.len() {
+                1 => Ok(item),
+                number_of_arguments => {
+                    Err(VecSingletonError::IncorrectNumberOfArguments {
+                        number_of_arguments,
+                        name: name.to_string(),
+                    })
+                }
+            }
+        } else {
+            Err(VecSingletonError::IncorrectNumberOfArguments {
+                number_of_arguments: 0,
+                name: name.to_string(),
+            })
+        }
     }
 }
 
