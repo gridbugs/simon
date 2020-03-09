@@ -924,7 +924,7 @@ where
                 0 => Ok(item),
                 number_of_arguments => {
                     Err(VecSingletonError::IncorrectNumberOfArguments {
-                        number_of_arguments,
+                        number_of_arguments: number_of_arguments + 1,
                         name: name.to_string(),
                     })
                 }
