@@ -4,7 +4,7 @@ use simon::*;
 
 fn main() {
     match free::<String>()
-        .map(|v| v.into_iter().next())
+        .vec_singleton()
         .required()
         .parse_env()
         .result

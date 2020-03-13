@@ -896,7 +896,7 @@ where
                 name,
             } => write!(
                 f,
-                "exactly one arguments was expected for {} ({} found)",
+                "at most one arguments was expected for {} ({} found)",
                 name, number_of_arguments
             ),
         }
@@ -907,7 +907,7 @@ impl<A, T> Arg for VecSingleton<A>
 where
     A: Arg<Item = Vec<T>>,
 {
-    type Item = T;
+    type Item = Option<T>;
     type Error = VecSingletonError<A::Error>;
     fn update_switches<S: Switches>(&self, switches: &mut S) {
         self.arg.update_switches(switches);
@@ -921,7 +921,7 @@ where
         let mut args: Vec<T> = arg.get(matches).map_err(VecSingletonError::Arg)?;
         if let Some(item) = args.pop() {
             match args.len() {
-                0 => Ok(item),
+                0 => Ok(Some(item)),
                 number_of_arguments => {
                     Err(VecSingletonError::IncorrectNumberOfArguments {
                         number_of_arguments: number_of_arguments + 1,
@@ -930,10 +930,7 @@ where
                 }
             }
         } else {
-            Err(VecSingletonError::IncorrectNumberOfArguments {
-                number_of_arguments: 0,
-                name: name.to_string(),
-            })
+            Ok(None)
         }
     }
 }
