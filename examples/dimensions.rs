@@ -1,5 +1,3 @@
-extern crate simon;
-
 use simon::*;
 
 #[derive(Debug, Clone)]

@@ -1,5 +1,3 @@
-extern crate simon;
-
 use simon::*;
 
 fn main() {
